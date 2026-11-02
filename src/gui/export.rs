@@ -25,7 +25,9 @@ pub struct Job {
 pub type JobHandle = Arc<Mutex<Option<Job>>>;
 
 /// Wszystkie eksporty dzielą jeden wskaźnik postępu – drugi naraz nadpisałby pierwszy.
-pub const BUSY_MSG: &str = "Trwa już eksport – poczekaj na jego zakończenie";
+pub fn busy_msg() -> &'static str {
+    t!("export.busy")
+}
 
 pub fn busy(job: &JobHandle) -> bool {
     job.lock().unwrap_or_else(|e| e.into_inner()).is_some()
@@ -39,8 +41,8 @@ fn spawn_job(job: JobHandle, title: &str, total: usize, work: impl FnOnce(&JobHa
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&job)));
         let msg = match res {
             Ok(Ok(msg)) => msg,
-            Ok(Err(e)) => format!("Błąd eksportu: {e:#}"),
-            Err(_) => "Błąd eksportu: nieoczekiwany błąd programu".to_string(),
+            Ok(Err(e)) => t!("export.failed", error = format!("{e:#}")),
+            Err(_) => t!("export.failed", error = t!("export.unexpected_error")),
         };
         set_job(&job, |j| j.finished = Some(msg));
     });
@@ -94,12 +96,13 @@ pub fn safe_name(s: &str) -> String {
         .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
         .collect();
     let s = s.trim_matches('_').to_string();
-    if s.is_empty() { "seria".into() } else { s }
+    if s.is_empty() { t!("export.file.series").into() } else { s }
 }
 
 pub fn series_base_name(series: &Series) -> String {
     format!(
-        "seria{}_{}",
+        "{}{}_{}",
+        t!("export.file.series"),
         series.number.unwrap_or(series.id as i32),
         safe_name(&series.description)
     )
@@ -121,7 +124,7 @@ pub fn export_series(
     quality: u8,
     job: JobHandle,
 ) {
-    spawn_job(job, "Eksport serii", series.slices.len(), move |job| {
+    spawn_job(job, t!("export.job.series"), series.slices.len(), move |job| {
         let n = series.slices.len();
         let spacing = series.pixel_spacing.unwrap_or((1.0, 1.0));
         let base = series_base_name(&series);
@@ -133,15 +136,15 @@ pub fn export_series(
             save_image(&img, &sub.join(format!("{:03}.{}", i + 1, format.ext())), format, quality)?;
             set_job(job, |j| j.done = i + 1);
         }
-        Ok(format!("Zapisano {n} obrazów w {}", sub.display()))
+        Ok(crate::i18n::trn_args("export.saved_series", n as u64, &[("path", &sub.display())]))
     });
 }
 
 /// Animacja GIF całej serii.
 pub fn export_gif(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: RenderOpts, fps: f32, job: JobHandle) {
-    spawn_job(job, "Animacja GIF", series.slices.len(), move |job| {
+    spawn_job(job, t!("export.job.gif"), series.slices.len(), move |job| {
         let n = series.slices.len();
-        anyhow::ensure!(n > 0, "seria nie ma obrazów");
+        anyhow::ensure!(n > 0, t!("export.error.no_images"));
         let spacing = series.pixel_spacing.unwrap_or((1.0, 1.0));
         {
             let mut w = BufWriter::new(std::fs::File::create(&path)?);
@@ -161,7 +164,7 @@ pub fn export_gif(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: Rend
             drop(enc);
             w.flush()?;
         }
-        Ok(format!("Zapisano animację {}", path.display()))
+        Ok(t!("export.saved_gif", path = path.display()))
     });
 }
 
@@ -174,8 +177,8 @@ pub fn export_montage(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: 
     } else {
         (0..count).map(|i| (i as f64 * (n - 1) as f64 / (count - 1) as f64).round() as usize).collect()
     };
-    spawn_job(job, "Mozaika", idxs.len(), move |job| {
-        anyhow::ensure!(n > 0, "seria nie ma obrazów");
+    spawn_job(job, t!("export.job.montage"), idxs.len(), move |job| {
+        anyhow::ensure!(n > 0, t!("export.error.no_images"));
         {
             let mut frames = Vec::new();
             for (k, &i) in idxs.iter().enumerate() {
@@ -189,7 +192,7 @@ pub fn export_montage(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: 
             let (canvas, w, h) = imaging::render_montage(&pairs, window, o.invert, series.pixel_spacing, 320, cols);
             std::fs::write(&path, imaging::encode_png_gray(&canvas, w, h)?)?;
         }
-        Ok(format!("Zapisano mozaikę {}", path.display()))
+        Ok(t!("export.saved_montage", path = path.display()))
     });
 }
 
@@ -199,7 +202,7 @@ pub fn copy_to_clipboard(img: &RgbaImage) -> Result<()> {
     static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
     let mut guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
-        *guard = Some(arboard::Clipboard::new().map_err(|e| anyhow!("schowek niedostępny: {e}"))?);
+        *guard = Some(arboard::Clipboard::new().map_err(|e| anyhow!(t!("export.clipboard.unavailable", error = e)))?);
     }
     let cb = guard.as_mut().expect("schowek utworzony powyżej");
     cb.set_image(arboard::ImageData {
@@ -207,7 +210,7 @@ pub fn copy_to_clipboard(img: &RgbaImage) -> Result<()> {
         height: img.height() as usize,
         bytes: std::borrow::Cow::Borrowed(img.as_raw()),
     })
-    .map_err(|e| anyhow!("nie udało się skopiować: {e}"))
+    .map_err(|e| anyhow!(t!("export.clipboard.copy_failed", error = e)))
 }
 
 // --- Claude Desktop ---------------------------------------------------------------------------------
@@ -267,20 +270,20 @@ pub fn claude_code_command(exe: &Path, args: &[String]) -> String {
 
 /// Dopisuje serwer „mri” do konfiguracji Claude Desktop (z kopią zapasową).
 pub fn install_into_claude_desktop(exe: &Path, args: &[String]) -> Result<PathBuf> {
-    let path = claude_desktop_config_path().ok_or_else(|| anyhow!("nie znaleziono katalogu domowego"))?;
+    let path = claude_desktop_config_path().ok_or_else(|| anyhow!(t!("export.desktop.no_home")))?;
     let mut root: serde_json::Value = if path.exists() {
-        let text = std::fs::read_to_string(&path).context("odczyt konfiguracji")?;
-        std::fs::write(path.with_extension("json.bak"), &text).context("kopia zapasowa")?;
-        if text.trim().is_empty() { serde_json::json!({}) } else { serde_json::from_str(&text).context("konfiguracja nie jest poprawnym JSON-em")? }
+        let text = std::fs::read_to_string(&path).context(t!("export.desktop.read_config"))?;
+        std::fs::write(path.with_extension("json.bak"), &text).context(t!("export.desktop.backup"))?;
+        if text.trim().is_empty() { serde_json::json!({}) } else { serde_json::from_str(&text).context(t!("export.desktop.invalid_json"))? }
     } else {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
         serde_json::json!({})
     };
-    let obj = root.as_object_mut().ok_or_else(|| anyhow!("nieoczekiwany format konfiguracji"))?;
+    let obj = root.as_object_mut().ok_or_else(|| anyhow!(t!("export.desktop.unexpected_format")))?;
     let servers = obj.entry("mcpServers").or_insert_with(|| serde_json::json!({}));
-    let servers = servers.as_object_mut().ok_or_else(|| anyhow!("mcpServers nie jest obiektem"))?;
+    let servers = servers.as_object_mut().ok_or_else(|| anyhow!(t!("export.desktop.servers_not_object")))?;
     servers.insert(
         "mri".into(),
         serde_json::json!({ "command": exe.display().to_string(), "args": args }),

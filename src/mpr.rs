@@ -64,9 +64,9 @@ pub fn available_planes(series: &Series) -> Vec<Plane> {
 pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Option<usize>) -> Result<Reformat> {
     let o = series
         .orientation
-        .ok_or_else(|| anyhow!("seria nie ma informacji o orientacji, rekonstrukcja niemożliwa"))?;
+        .ok_or_else(|| anyhow!(t!("err.mpr.no_orientation")))?;
     if frames.len() < 2 {
-        bail!("za mało przekrojów do rekonstrukcji");
+        bail!(t!("err.mpr.too_few_slices"));
     }
     let r = [o[0], o[1], o[2]];
     let c = [o[3], o[4], o[5]];
@@ -82,11 +82,11 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
     for f in frames {
         match &f.pixels {
             Pixels::Gray(v) if f.width as usize == w && f.height as usize == h => vols.push(v),
-            _ => bail!("przekroje mają różne rozmiary albo są kolorowe"),
+            _ => bail!(t!("err.mpr.mixed_slices")),
         }
     }
     if series.has_duplicate_positions() {
-        bail!("kilka przekrojów leży w tym samym miejscu (np. różne echa) – rekonstrukcja niemożliwa");
+        bail!(t!("err.mpr.duplicate_positions"));
     }
     let (sr, sc) = series.pixel_spacing.unwrap_or((1.0, 1.0));
     let gap = series.slice_gap().unwrap_or(sr.max(sc));
@@ -97,10 +97,7 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
     } else if plane_from_normal(&r) == plane {
         Axis::Col
     } else {
-        bail!(
-            "płaszczyzna {} to płaszczyzna akwizycji tej serii albo jest niedostępna – użyj zwykłego przeglądania przekrojów",
-            plane.pl()
-        );
+        bail!(t!("err.mpr.plane_unavailable", plane = plane.label()));
     };
     let (a1, a2) = match fixed {
         Axis::Row => (Axis::Col, Axis::Slice),

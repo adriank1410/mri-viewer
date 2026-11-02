@@ -42,7 +42,8 @@ pub struct Series {
     pub sequence: SequenceInfo,
     pub series_date: String,
     pub series_time: String,
-    /// Odmiana w obrębie jednej serii DICOM (np. „echo 2”, „b = 1000”, „faza 3”), pusta gdy brak.
+    /// Odmiana w obrębie jednej serii DICOM (np. „echo 2”, „b = 1000”, „t3” – faza dynamiczna, „#2” – kolejny stos),
+    /// pusta gdy brak. Postać niezależna od języka, bo trafia też do opisu serii i do MCP.
     pub variant: String,
     /// Obrazy mogą mieć wpisane w piksele dane pacjenta (zrzut ekranu, skan dokumentu,
     /// BurnedInAnnotation = YES itp.) – nie wysyłamy ich do Claude w trybie anonimowym.
@@ -88,15 +89,17 @@ pub enum Plane {
 }
 
 impl Plane {
-    pub fn pl(&self) -> &'static str {
+    /// Nazwa płaszczyzny w bieżącym języku interfejsu.
+    pub fn label(&self) -> &'static str {
         match self {
-            Plane::Axial => "poprzeczna",
-            Plane::Sagittal => "strzałkowa",
-            Plane::Coronal => "czołowa",
-            Plane::Oblique => "skośna",
-            Plane::Unknown => "nieznana",
+            Plane::Axial => t!("lib.plane.axial"),
+            Plane::Sagittal => t!("lib.plane.sagittal"),
+            Plane::Coronal => t!("lib.plane.coronal"),
+            Plane::Oblique => t!("lib.plane.oblique"),
+            Plane::Unknown => t!("lib.plane.unknown"),
         }
     }
+    /// Nazwa angielska, niezależna od języka interfejsu (serwer MCP, sortowanie).
     pub fn en(&self) -> &'static str {
         match self {
             Plane::Axial => "axial",
@@ -621,12 +624,15 @@ fn fmt_num(v: f64) -> String {
 }
 
 /// Wymiary, które w jednej serii DICOM rozróżniają obrazy w tym samym położeniu.
+/// Opisy są zapisywane w danych serii (także dla MCP), więc mają postać niezależną od języka.
 const VARIANT_DIMS: [VariantDim; 5] = [
     (|h| h.echo_number.map(f64::from), |v| format!("echo {}", fmt_num(v))),
     (|h| h.sequence.echo_time, |v| format!("TE {} ms", fmt_num(v))),
     (|h| h.b_value, |v| format!("b = {}", fmt_num(v))),
-    (|h| h.temporal_position.map(f64::from), |v| format!("faza {}", fmt_num(v))),
-    (|h| h.acquisition_number.map(f64::from), |v| format!("akwizycja {}", fmt_num(v))),
+    // faza dynamiczna (TemporalPositionIdentifier)
+    (|h| h.temporal_position.map(f64::from), |v| format!("t{}", fmt_num(v))),
+    // numer akwizycji (AcquisitionNumber)
+    (|h| h.acquisition_number.map(f64::from), |v| format!("acq {}", fmt_num(v))),
 ];
 
 /// Rozdziela stos z powtarzającymi się położeniami (wiele ech, wartości b, faz dynamicznych)
@@ -692,7 +698,7 @@ fn split_variants(hs: Vec<Header>, n: Option<&[f64; 3]>) -> Vec<(String, Vec<f64
     groups
         .into_iter()
         .enumerate()
-        .map(|(i, g)| (format!("stos {}", i + 1), vec![i as f64], g))
+        .map(|(i, g)| (format!("#{}", i + 1), vec![i as f64], g))
         .collect()
 }
 
@@ -706,21 +712,20 @@ pub fn fmt_date(d: &str) -> String {
 }
 
 impl Series {
-    /// Krótki opis serii po polsku, np. „T2 TSE (strzałkowa, 24 obrazy)”.
+    /// Krótki opis serii w języku interfejsu, np. „3. T2 TSE · strzałkowa · 24 obrazy”.
     pub fn title(&self) -> String {
-        let desc = if self.description.is_empty() {
-            "(bez opisu)".to_string()
-        } else {
-            self.description.clone()
-        };
-        format!(
-            "{}{} · {} · {} {}",
-            self.number.map(|n| format!("{}. ", n)).unwrap_or_default(),
-            desc,
-            self.plane.pl(),
-            self.slices.len(),
-            plural_obraz(self.slices.len())
+        t!(
+            "lib.series.title",
+            number = self.number.map(|n| format!("{}. ", n)).unwrap_or_default(),
+            description = self.display_description(),
+            plane = self.plane.label(),
+            images = images_count(self.slices.len())
         )
+    }
+
+    /// Opis serii do wyświetlenia – „(bez opisu)”, gdy plik go nie podaje.
+    pub fn display_description(&self) -> &str {
+        if self.description.is_empty() { t!("lib.series.no_description") } else { &self.description }
     }
 
     /// Czy dwa przekroje leżą w tym samym miejscu (stos nie nadaje się do rekonstrukcji).
@@ -761,14 +766,9 @@ impl Series {
     }
 }
 
-pub fn plural_obraz(n: usize) -> &'static str {
-    if n == 1 {
-        "obraz"
-    } else if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) {
-        "obrazy"
-    } else {
-        "obrazów"
-    }
+/// Liczba obrazów z właściwą odmianą, np. „24 obrazy” / „24 images”.
+pub fn images_count(n: usize) -> String {
+    crate::i18n::trn("lib.images", n as u64)
 }
 
 #[cfg(test)]
