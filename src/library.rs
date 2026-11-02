@@ -37,6 +37,8 @@ pub struct Series {
     pub slice_thickness: Option<f64>,
     pub spacing_between_slices: Option<f64>,
     pub orientation: Option<[f64; 6]>,
+    /// FrameOfReferenceUID – serie z tym samym UID mają wspólny układ współrzędnych pacjenta.
+    pub frame_of_reference: String,
     pub sequence: SequenceInfo,
     pub series_date: String,
     pub series_time: String,
@@ -142,6 +144,7 @@ struct Header {
     slice_thickness: Option<f64>,
     spacing_between_slices: Option<f64>,
     orientation: Option<[f64; 6]>,
+    frame_of_reference: String,
     position: Option<[f64; 3]>,
     slice_location: Option<f64>,
     instance_number: Option<i32>,
@@ -270,6 +273,7 @@ fn read_header(path: &Path) -> Option<Header> {
         },
         series_date: text(&obj, tags::SERIES_DATE),
         series_time: text(&obj, tags::SERIES_TIME),
+        frame_of_reference: text(&obj, tags::FRAME_OF_REFERENCE_UID),
     })
 }
 
@@ -415,6 +419,7 @@ fn build_library(root: &Path, headers: Vec<Header>, skipped_files: usize) -> Lib
                     slice_thickness: first.slice_thickness,
                     spacing_between_slices: first.spacing_between_slices,
                     orientation,
+                    frame_of_reference: first.frame_of_reference.clone(),
                     sequence: first.sequence.clone(),
                     series_date: first.series_date.clone(),
                     series_time: first.series_time.clone(),
