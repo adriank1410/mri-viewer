@@ -342,6 +342,10 @@ impl Viewport {
     pub fn set_position(&mut self, series: &Series, p: i64) {
         let n = self.count(series) as i64;
         let p = p.clamp(0, (n - 1).max(0)) as usize;
+        // ten sam przekrój (np. przewijanie na końcu serii) – nie przerywamy rysowanego pomiaru
+        if p == self.position() {
+            return;
+        }
         match self.plane {
             ViewPlane::Native => self.slice = p,
             ViewPlane::Reformat(_) => self.reformat_pos = p,
@@ -352,7 +356,8 @@ impl Viewport {
     }
 
     /// Kończy edycję opisu strzałki; zmianę opisu zapisuje do cofnięcia.
-    fn finish_text_edit(&mut self, store: &mut Store) {
+    /// Trzeba ją wywołać przed każdą inną zmianą pomiarów, inaczej historia cofania się pomiesza.
+    pub fn finish_text_edit(&mut self, store: &mut Store) {
         self.editing_text = None;
         if let Some((k, before)) = self.edit_before.take() {
             store.commit_if_changed(k, before);
@@ -635,9 +640,10 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         let cur_img = resp.interact_pointer_pos().map(|p| map.to_image(p));
         match vp.drag {
             Drag::Window => {
-                let range = (frame.max - frame.min).max(1.0);
+                // mapy parametryczne mają zakresy rzędu 0,001 – czułość i minimum zależne od zakresu
+                let range = (frame.max - frame.min).max(frame.window_eps());
                 let k = range / 600.0;
-                ww = (ww + d.x * k).max(1.0);
+                ww = (ww + d.x * k).max(frame.window_eps());
                 wc -= d.y * k;
                 vp.window = Some((wc, ww));
             }
@@ -943,6 +949,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                     ui.close();
                 }
                 if ui.button("Usuń ten pomiar").clicked() {
+                    vp.finish_text_edit(&mut *inp.store);
                     inp.store.delete(key, id);
                     vp.selected = None;
                     ui.close();

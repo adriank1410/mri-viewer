@@ -30,6 +30,9 @@ enum ScanMsg {
     Done(Library),
 }
 
+/// Ile przekrojów wokół bieżącego wczytywać ponownie po wypadnięciu serii z pamięci.
+const RELOAD_RADIUS: usize = 12;
+
 struct Loader {
     generation: Arc<AtomicUsize>,
     target: Arc<AtomicUsize>,
@@ -251,6 +254,7 @@ impl App {
 
     fn ensure_loader(&mut self, series: &Series, ctx: &egui::Context) {
         let mut failed = Arc::new(Mutex::new(HashSet::new()));
+        let reload = self.loaders.contains_key(&series.id);
         if let Some(l) = self.loaders.get(&series.id) {
             if l.alive.load(Ordering::SeqCst) > 0 {
                 return;
@@ -275,7 +279,12 @@ impl App {
             keep
         });
         let generation = Arc::new(AtomicUsize::new(0));
-        let target = Arc::new(AtomicUsize::new(series.slices.len() / 2));
+        let start = self
+            .viewports
+            .iter()
+            .find(|v| v.series_id == Some(series.id) && v.plane == ViewPlane::Native)
+            .map_or(series.slices.len() / 2, |v| v.slice);
+        let target = Arc::new(AtomicUsize::new(start));
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 6);
         let alive = Arc::new(AtomicUsize::new(workers));
         self.loaders.insert(
@@ -287,7 +296,15 @@ impl App {
         let done: Arc<Mutex<Vec<bool>>> = {
             let bad = failed.lock().unwrap();
             Arc::new(Mutex::new(
-                slices.iter().enumerate().map(|(i, s)| bad.contains(&i) || self.cache.peek(s).is_some()).collect(),
+                // ponowne wczytanie (obrazy wypadły z pamięci, bo otwarte serie się w niej nie mieszczą):
+                // tylko okolica bieżącego przekroju, żeby serie nie wypychały się nawzajem bez końca
+                slices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        bad.contains(&i) || self.cache.peek(s).is_some() || (reload && i.abs_diff(start) > RELOAD_RADIUS)
+                    })
+                    .collect(),
             ))
         };
         for _ in 0..workers {
@@ -605,6 +622,15 @@ impl App {
 
     fn handle_action(&mut self, a: Action, ctx: &egui::Context) {
         let vi = self.active;
+        // zmiana pomiarów w trakcie edycji opisu strzałki: najpierw zapisujemy edycję do historii
+        if matches!(
+            a,
+            Action::Undo | Action::Redo | Action::DeleteSelected | Action::DeleteSliceAnnotations | Action::DeleteAllAnnotations
+        ) {
+            for vp in &mut self.viewports {
+                vp.finish_text_edit(&mut self.store);
+            }
+        }
         match a {
             Action::OpenFolder => self.choose_folder(ctx),
             Action::OpenFile => self.choose_file(ctx),
@@ -738,7 +764,7 @@ impl App {
             Action::PresetDicom => vp.window = None,
             Action::PresetFull => {
                 if let Some((f, _, _)) = self.current_frame(vi, &series) {
-                    self.viewports[vi].window = Some(((f.min + f.max) / 2.0, (f.max - f.min).max(1.0)));
+                    self.viewports[vi].window = Some(((f.min + f.max) / 2.0, (f.max - f.min).max(f.window_eps())));
                 }
             }
             Action::SaveImage => {
@@ -806,7 +832,7 @@ impl App {
     fn keyboard(&mut self, ctx: &egui::Context) {
         let mut acts = Vec::new();
         // pole tekstowe ma fokus – cofanie i Ctrl+W należą do niego
-        let typing = ctx.egui_wants_keyboard_input();
+        let typing = ctx.text_edit_focused();
         // skróty z modyfikatorami (na macOS obsługuje je menu systemowe)
         if !cfg!(target_os = "macos") {
             for (a, s) in actions::shortcuts_by_specificity() {
@@ -818,11 +844,13 @@ impl App {
                 }
             }
         } else if typing {
-            // menu systemowe przechwytuje Cmd+Z – oddajemy cofanie polu tekstowemu
+            // menu systemowe przechwytuje Cmd+Z – oddajemy cofanie polu tekstowemu,
+            // a pozostałe skróty kolidujące z pisaniem (Cmd+W, Cmd+R) pomijamy
             self.pending.retain(|a| {
                 let shift = match a {
                     Action::Undo => false,
                     Action::Redo => true,
+                    a if a.conflicts_with_text_edit() => return false,
                     _ => return true,
                 };
                 let mut modifiers = egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND;
@@ -974,7 +1002,11 @@ impl App {
                                             se.slices.len(),
                                             library::plural_obraz(se.slices.len())
                                         ));
-                                        if let Some(err) = self.errors.lock().unwrap().get(&se.id) {
+                                        if se.may_have_burned_in_text {
+                                            ui.small(egui::RichText::new("Może zawierać wpisane dane pacjenta").color(Color32::from_rgb(230, 170, 80)))
+                                                .on_hover_text("Zrzut ekranu, skan dokumentu albo obraz z opisami. Przez MCP Claude go nie zobaczy, chyba że włączysz pokazywanie danych pacjenta.");
+                                        }
+                                        if let Some(err) = self.errors.lock().unwrap_or_else(|e| e.into_inner()).get(&se.id) {
                                             ui.small(egui::RichText::new(format!("Błąd: {err}")).color(Color32::LIGHT_RED));
                                         }
                                     });
@@ -1212,11 +1244,11 @@ impl App {
                 if pro {
                     ui.separator();
                     let (mut c, mut w) = self.viewports[vi].window.unwrap_or(f.default_window());
-                    let step = ((f.max - f.min) / 500.0).max(0.5);
+                    let step = ((f.max - f.min) / 500.0).max(f.window_eps());
                     let mut changed = false;
                     ui.horizontal(|ui| {
                         ui.label("Szerokość (W):");
-                        changed |= ui.add(egui::DragValue::new(&mut w).speed(step).range(1.0..=f32::MAX)).changed();
+                        changed |= ui.add(egui::DragValue::new(&mut w).speed(step).range(f.window_eps()..=f32::MAX)).changed();
                     });
                     ui.horizontal(|ui| {
                         ui.label("Poziom (L):");
@@ -1362,7 +1394,7 @@ impl App {
                     return;
                 };
                 const BINS: usize = 128;
-                let range = (f.max - f.min).max(1.0);
+                let range = (f.max - f.min).max(f32::MIN_POSITIVE);
                 let mut hist = [0u32; BINS];
                 for &p in v.iter() {
                     hist[(((p - f.min) / range) * (BINS - 1) as f32) as usize] += 1;
@@ -1482,7 +1514,7 @@ impl App {
                     ui.ctx().copy_text(snippet.clone());
                 }
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new("Claude Code (terminal)").strong());
+                ui.label(egui::RichText::new(if cfg!(windows) { "Claude Code (terminal PowerShell)" } else { "Claude Code (terminal)" }).strong());
                 let cmd = export::claude_code_command(&exe, &args);
                 ui.add(egui::TextEdit::multiline(&mut cmd.as_str()).code_editor().desired_rows(2).desired_width(f32::INFINITY));
                 if ui.button("Kopiuj polecenie").clicked() {
@@ -1667,7 +1699,7 @@ impl eframe::App for App {
             self.handle_shot(p, r, ppp, img);
         }
         let job_line = {
-            let mut j = self.job.lock().unwrap();
+            let mut j = self.job.lock().unwrap_or_else(|e| e.into_inner());
             match j.as_ref() {
                 Some(job) if job.finished.is_some() => {
                     self.status = job.finished.clone().unwrap();
@@ -1793,6 +1825,7 @@ impl eframe::App for App {
                 if (self.viewports[vi].plane_code(), self.viewports[vi].position()) != fetched[vi] {
                     f = self.current_frame(vi, &series);
                     self.viewports[vi].plane_geom = f.as_ref().and_then(|x| x.2);
+                    planes[vi] = self.viewports[vi].plane_geom;
                     fetched[vi] = (self.viewports[vi].plane_code(), self.viewports[vi].position());
                 }
                 let Some((frame, spacing, _)) = f else {
@@ -1861,6 +1894,8 @@ impl eframe::App for App {
                 }
                 if let Some(p) = out.cursor3d {
                     self.apply_cursor3d(vi, p);
+                    // okna narysowane wcześniej w tej klatce pokażą nowy przekrój dopiero w następnej
+                    ctx.request_repaint();
                 }
                 if let Some(s) = out.status {
                     self.hover_status = s;

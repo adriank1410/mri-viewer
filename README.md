@@ -71,7 +71,7 @@ Zapisz plik i uruchom Claude Desktop ponownie. Prościej: w programie wybierz **
 ### Claude Code
 
 ```
-claude mcp add mri -- "/Applications/MRI Viewer.app/Contents/MacOS/mri-viewer" mcp /Users/TWOJA_NAZWA/Downloads/MRI
+claude mcp add --scope user mri -- "/Applications/MRI Viewer.app/Contents/MacOS/mri-viewer" mcp /Users/TWOJA_NAZWA/Downloads/MRI
 ```
 
 ### Prywatność

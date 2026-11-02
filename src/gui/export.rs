@@ -28,12 +28,22 @@ pub type JobHandle = Arc<Mutex<Option<Job>>>;
 pub const BUSY_MSG: &str = "Trwa już eksport – poczekaj na jego zakończenie";
 
 pub fn busy(job: &JobHandle) -> bool {
-    job.lock().unwrap().is_some()
+    job.lock().unwrap_or_else(|e| e.into_inner()).is_some()
 }
 
-/// Zajmuje wskaźnik jeszcze w wątku interfejsu, zanim ruszy wątek eksportu.
-fn start_job(job: &JobHandle, title: &str, total: usize) {
-    *job.lock().unwrap() = Some(Job { title: title.into(), total, ..Default::default() });
+/// Zajmuje wskaźnik jeszcze w wątku interfejsu i uruchamia eksport w tle.
+/// Wynik (także błąd albo panika wątku) zawsze trafia do `finished`, więc wskaźnik nigdy nie zostaje zajęty na stałe.
+fn spawn_job(job: JobHandle, title: &str, total: usize, work: impl FnOnce(&JobHandle) -> Result<String> + Send + 'static) {
+    *job.lock().unwrap_or_else(|e| e.into_inner()) = Some(Job { title: title.into(), total, ..Default::default() });
+    std::thread::spawn(move || {
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&job)));
+        let msg = match res {
+            Ok(Ok(msg)) => msg,
+            Ok(Err(e)) => format!("Błąd eksportu: {e:#}"),
+            Err(_) => "Błąd eksportu: nieoczekiwany błąd programu".to_string(),
+        };
+        set_job(&job, |j| j.finished = Some(msg));
+    });
 }
 
 #[derive(Clone, Copy)]
@@ -96,7 +106,7 @@ pub fn series_base_name(series: &Series) -> String {
 }
 
 fn set_job(job: &JobHandle, f: impl FnOnce(&mut Job)) {
-    if let Some(j) = job.lock().unwrap().as_mut() {
+    if let Some(j) = job.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         f(j);
     }
 }
@@ -111,38 +121,29 @@ pub fn export_series(
     quality: u8,
     job: JobHandle,
 ) {
-    start_job(&job, "Eksport serii", series.slices.len());
-    std::thread::spawn(move || {
+    spawn_job(job, "Eksport serii", series.slices.len(), move |job| {
         let n = series.slices.len();
         let spacing = series.pixel_spacing.unwrap_or((1.0, 1.0));
         let base = series_base_name(&series);
         let sub = dir.join(&base);
-        let res: Result<()> = (|| {
-            std::fs::create_dir_all(&sub)?;
-            for (i, s) in series.slices.iter().enumerate() {
-                let f = cache.get(s)?;
-                let img = render_image(&f, spacing, &o, None);
-                save_image(&img, &sub.join(format!("{:03}.{}", i + 1, format.ext())), format, quality)?;
-                set_job(&job, |j| j.done = i + 1);
-            }
-            Ok(())
-        })();
-        set_job(&job, |j| {
-            j.finished = Some(match res {
-                Ok(()) => format!("Zapisano {n} obrazów w {}", sub.display()),
-                Err(e) => format!("Błąd eksportu: {e:#}"),
-            })
-        });
+        std::fs::create_dir_all(&sub)?;
+        for (i, s) in series.slices.iter().enumerate() {
+            let f = cache.get(s)?;
+            let img = render_image(&f, spacing, &o, None);
+            save_image(&img, &sub.join(format!("{:03}.{}", i + 1, format.ext())), format, quality)?;
+            set_job(job, |j| j.done = i + 1);
+        }
+        Ok(format!("Zapisano {n} obrazów w {}", sub.display()))
     });
 }
 
 /// Animacja GIF całej serii.
 pub fn export_gif(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: RenderOpts, fps: f32, job: JobHandle) {
-    start_job(&job, "Animacja GIF", series.slices.len());
-    std::thread::spawn(move || {
+    spawn_job(job, "Animacja GIF", series.slices.len(), move |job| {
         let n = series.slices.len();
+        anyhow::ensure!(n > 0, "seria nie ma obrazów");
         let spacing = series.pixel_spacing.unwrap_or((1.0, 1.0));
-        let res: Result<()> = (|| {
+        {
             let mut w = BufWriter::new(std::fs::File::create(&path)?);
             let mut enc = image::codecs::gif::GifEncoder::new_with_speed(&mut w, 10);
             enc.set_repeat(image::codecs::gif::Repeat::Infinite)?;
@@ -154,19 +155,13 @@ pub fn export_gif(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: Rend
                 let f = cache.get(s)?;
                 let img = render_image(&f, spacing, &o, Some(512));
                 enc.encode_frame(image::Frame::from_parts(img, 0, 0, delay))?;
-                set_job(&job, |j| j.done = i + 1);
+                set_job(job, |j| j.done = i + 1);
             }
             // koder dopisuje zakończenie pliku przy zwolnieniu, potem jawne opróżnienie bufora
             drop(enc);
             w.flush()?;
-            Ok(())
-        })();
-        set_job(&job, |j| {
-            j.finished = Some(match res {
-                Ok(()) => format!("Zapisano animację {}", path.display()),
-                Err(e) => format!("Błąd eksportu: {e:#}"),
-            })
-        });
+        }
+        Ok(format!("Zapisano animację {}", path.display()))
     });
 }
 
@@ -179,13 +174,13 @@ pub fn export_montage(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: 
     } else {
         (0..count).map(|i| (i as f64 * (n - 1) as f64 / (count - 1) as f64).round() as usize).collect()
     };
-    start_job(&job, "Mozaika", idxs.len());
-    std::thread::spawn(move || {
-        let res: Result<()> = (|| {
+    spawn_job(job, "Mozaika", idxs.len(), move |job| {
+        anyhow::ensure!(n > 0, "seria nie ma obrazów");
+        {
             let mut frames = Vec::new();
             for (k, &i) in idxs.iter().enumerate() {
                 frames.push(cache.get(&series.slices[i])?);
-                set_job(&job, |j| j.done = k + 1);
+                set_job(job, |j| j.done = k + 1);
             }
             let mid = &frames[frames.len() / 2];
             let window = o.window.unwrap_or(mid.default_window());
@@ -193,14 +188,8 @@ pub fn export_montage(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: 
             let cols = (pairs.len() as f64).sqrt().ceil() as u32;
             let (canvas, w, h) = imaging::render_montage(&pairs, window, o.invert, series.pixel_spacing, 320, cols);
             std::fs::write(&path, imaging::encode_png_gray(&canvas, w, h)?)?;
-            Ok(())
-        })();
-        set_job(&job, |j| {
-            j.finished = Some(match res {
-                Ok(()) => format!("Zapisano mozaikę {}", path.display()),
-                Err(e) => format!("Błąd eksportu: {e:#}"),
-            })
-        });
+        }
+        Ok(format!("Zapisano mozaikę {}", path.display()))
     });
 }
 
@@ -254,9 +243,8 @@ fn shell_quote(s: &str, windows: bool) -> String {
     if safe {
         s.to_string()
     } else if windows {
-        // końcowy „\” przed cudzysłowem trzeba podwoić, inaczej zjada cudzysłów
-        let tail = if s.ends_with('\\') { "\\" } else { "" };
-        format!("\"{s}{tail}\"")
+        // PowerShell (domyślny terminal Windows): w apostrofach nic nie jest rozwijane ($, `), apostrof się podwaja
+        format!("'{}'", s.replace('\'', "''"))
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
@@ -311,9 +299,10 @@ mod tests {
     #[test]
     fn quote_windows() {
         assert_eq!(shell_quote(r"C:\mri\mri-viewer.exe", true), r"C:\mri\mri-viewer.exe");
-        assert_eq!(shell_quote(r"D:\Badania&Wyniki", true), r#""D:\Badania&Wyniki""#);
-        assert_eq!(shell_quote(r"C:\Program Files\", true), r#""C:\Program Files\\""#);
-        assert_eq!(shell_quote("a,b", true), "\"a,b\"");
+        assert_eq!(shell_quote(r"D:\Badania&Wyniki", true), r"'D:\Badania&Wyniki'");
+        assert_eq!(shell_quote(r"C:\Program Files\", true), r"'C:\Program Files\'");
+        assert_eq!(shell_quote("a,b", true), "'a,b'");
+        assert_eq!(shell_quote("C:\\$Dane's `x`", true), "'C:\\$Dane''s `x`'");
     }
 
     #[test]
@@ -326,8 +315,26 @@ mod tests {
     fn busy_after_start() {
         let job: JobHandle = Arc::new(Mutex::new(None));
         assert!(!busy(&job));
-        start_job(&job, "x", 3);
+        let (tx, rx) = std::sync::mpsc::channel();
+        spawn_job(job.clone(), "x", 3, move |_| {
+            rx.recv().ok();
+            Ok("ok".into())
+        });
         assert!(busy(&job));
+        tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn panicking_job_still_finishes() {
+        let job: JobHandle = Arc::new(Mutex::new(None));
+        spawn_job(job.clone(), "x", 1, |_| panic!("test"));
+        for _ in 0..200 {
+            if job.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|j| j.finished.is_some()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("zadanie nie zakończyło się po panice");
     }
 
     #[test]

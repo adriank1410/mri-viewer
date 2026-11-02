@@ -201,9 +201,10 @@ impl Action {
         })
     }
 
-    /// Skróty, które pole tekstowe obsługuje samo (cofanie w tekście, Ctrl+W – usuń słowo).
+    /// Skróty pomijane podczas pisania: cofanie i Ctrl+W obsługuje samo pole tekstowe,
+    /// a zamknięcie badania czy obrót obrazu przy wpisywaniu tekstu byłyby zaskoczeniem.
     pub fn conflicts_with_text_edit(&self) -> bool {
-        matches!(self, Undo | Redo | CloseStudy)
+        matches!(self, Undo | Redo | CloseStudy | RotateRight | RotateLeft)
     }
 
     pub fn pro_only(&self) -> bool {

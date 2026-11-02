@@ -227,10 +227,14 @@ fn number_any(obj: &DefaultDicomObject, tag: Tag) -> Option<f64> {
 
 /// Wartość b dyfuzji: tag standardowy, a w razie braku prywatne tagi Siemens, GE i Philips.
 fn b_value(obj: &DefaultDicomObject) -> Option<f64> {
+    // prywatne pola producentów czytamy tylko, gdy blok należy do właściwego producenta
+    let private = |group: u16, creator: &str, element: u16| {
+        text(obj, Tag(group, 0x0010)).to_uppercase().contains(creator).then(|| number_any(obj, Tag(group, element))).flatten()
+    };
     float(obj, tags::DIFFUSION_B_VALUE)
-        .or_else(|| number_any(obj, Tag(0x0019, 0x100C)))
-        .or_else(|| number_any(obj, Tag(0x0043, 0x1039)).map(|v| if v >= 1e9 { v - 1e9 } else { v }))
-        .or_else(|| number_any(obj, Tag(0x2001, 0x1003)))
+        .or_else(|| private(0x0019, "SIEMENS", 0x100C))
+        .or_else(|| private(0x0043, "GEMS_PARM", 0x1039).map(|v| if v >= 1e9 { v - 1e9 } else { v }))
+        .or_else(|| private(0x2001, "PHILIPS IMAGING", 0x1003))
         .filter(|v| (0.0..1e6).contains(v))
 }
 

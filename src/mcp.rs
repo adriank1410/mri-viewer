@@ -155,7 +155,8 @@ fn pick_window(frame: &Frame, w: &WindowArgs) -> (f32, f32, bool) {
     (
         w.window_center.unwrap_or(c0),
         // minimum zależne od zakresu wartości (mapy parametryczne bywają rzędu 0,001)
-        w.window_width.unwrap_or(w0).max(frame.window_eps()),
+        // podana szerokość tylko > 0; minimum zależne od zakresu dotyczy okna domyślnego
+        w.window_width.map_or(w0.max(frame.window_eps()), |ww| ww.max(f32::MIN_POSITIVE)),
         w.invert.unwrap_or(false),
     )
 }
@@ -163,8 +164,8 @@ fn pick_window(frame: &Frame, w: &WindowArgs) -> (f32, f32, bool) {
 /// Liczba z 3–4 cyframi znaczącymi, także dla bardzo małych wartości.
 fn fmt_val(v: f32) -> String {
     let a = v.abs();
-    if !a.is_finite() || a == 0.0 {
-        return format!("{v:.0}");
+    if !a.is_finite() || a < 1e-12 {
+        return if a.is_finite() { "0".into() } else { format!("{v}") };
     }
     let dec = (3 - a.log10().floor() as i32).clamp(0, 12) as usize;
     let s = format!("{v:.dec$}");
@@ -571,7 +572,11 @@ impl MriServer {
             .map(|(r, c)| format!(", area {:.1} mm²", n as f64 * r * c))
             .unwrap_or_default();
         Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "{n} pixels{area}: mean {mean:.1}, SD {sd:.1}, min {mn:.0}, max {mx:.0}"
+            "{n} pixels{area}: mean {}, SD {}, min {}, max {} (relative signal units, approximate)",
+            fmt_val(mean as f32),
+            fmt_val(sd as f32),
+            fmt_val(mn as f32),
+            fmt_val(mx as f32)
         ))]))
     }
 
