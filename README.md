@@ -36,7 +36,7 @@ Wersje dla Windows (`MRI-Viewer-Windows.zip`) i Linuksa (`MRI-Viewer-Linux.tar.g
 
 Serwer MCP pozwala Claude samodzielnie: wypisać serie badania z parametrami, obejrzeć wybrany przekrój, zobaczyć całą serię jako mozaikę miniatur, zrobić rekonstrukcję w innej płaszczyźnie, zmierzyć odległość, policzyć statystyki jasności w obszarze i odczytać nagłówki DICOM.
 
-Poniższe przykłady zakładają, że program jest w folderze Programy, a badania w `/Users/adriank1410/Downloads/MRI` – w razie potrzeby zmień ścieżkę.
+Poniższe przykłady zakładają, że program jest w folderze Programy, a badania w folderze `Pobrane/MRI`. Zamiast `TWOJA_NAZWA` wpisz nazwę swojego konta na Macu (widać ją w Finderze jako nazwę folderu domowego).
 
 ### Claude Desktop
 
@@ -47,7 +47,7 @@ Otwórz Claude Desktop → **Ustawienia → Developer → Edit Config** i wpisz 
   "mcpServers": {
     "mri": {
       "command": "/Applications/MRI Viewer.app/Contents/MacOS/mri-viewer",
-      "args": ["mcp", "/Users/adriank1410/Downloads/MRI"]
+      "args": ["mcp", "/Users/TWOJA_NAZWA/Downloads/MRI"]
     }
   }
 }
@@ -58,7 +58,7 @@ Zapisz plik i uruchom Claude Desktop ponownie. Potem możesz napisać np. „Pok
 ### Claude Code
 
 ```
-claude mcp add mri -- "/Applications/MRI Viewer.app/Contents/MacOS/mri-viewer" mcp /Users/adriank1410/Downloads/MRI
+claude mcp add mri -- "/Applications/MRI Viewer.app/Contents/MacOS/mri-viewer" mcp /Users/TWOJA_NAZWA/Downloads/MRI
 ```
 
 ### Prywatność
