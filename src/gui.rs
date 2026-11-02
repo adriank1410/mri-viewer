@@ -349,7 +349,7 @@ impl App {
         let ctx = ui.ctx().clone();
         ui.add_space(6.0);
         if ui
-            .add_sized([ui.available_width(), 32.0], egui::Button::new("📂  Otwórz folder z badaniem…"))
+            .add_sized([ui.available_width(), 32.0], egui::Button::new("Otwórz folder z badaniem…"))
             .clicked()
         {
             self.choose_folder(&ctx);
@@ -428,7 +428,7 @@ impl App {
                                             library::plural_obraz(se.slices.len())
                                         ));
                                         if let Some(err) = self.errors.lock().unwrap().get(&se.id) {
-                                            ui.small(egui::RichText::new(format!("⚠ {err}")).color(Color32::LIGHT_RED));
+                                            ui.small(egui::RichText::new(format!("Błąd: {err}")).color(Color32::LIGHT_RED));
                                         }
                                     });
                                 })
@@ -459,26 +459,26 @@ impl App {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Narzędzie:");
-            ui.selectable_value(&mut self.tool, Tool::Window, "☀ Jasność/kontrast")
+            ui.selectable_value(&mut self.tool, Tool::Window, "Jasność/kontrast")
                 .on_hover_text("Przeciągaj lewym przyciskiem: w poziomie kontrast, w pionie jasność");
-            ui.selectable_value(&mut self.tool, Tool::Pan, "✋ Przesuwanie")
+            ui.selectable_value(&mut self.tool, Tool::Pan, "Przesuwanie")
                 .on_hover_text("Przeciągaj, aby przesunąć obraz (prawy przycisk działa zawsze)");
-            ui.selectable_value(&mut self.tool, Tool::Measure, "📏 Pomiar")
+            ui.selectable_value(&mut self.tool, Tool::Measure, "Pomiar")
                 .on_hover_text("Kliknij dwa punkty, aby zmierzyć odległość w mm");
             ui.separator();
             let has_series = self.viewports[self.active].series_id.is_some();
             let vp = &mut self.viewports[self.active];
-            if ui.add_enabled(has_series, egui::Button::new("↺ Reset")).on_hover_text("Przywróć jasność, kontrast i powiększenie (albo dwuklik na obrazie)").clicked() {
+            if ui.add_enabled(has_series, egui::Button::new("Reset")).on_hover_text("Przywróć jasność, kontrast i powiększenie (albo dwuklik na obrazie)").clicked() {
                 vp.reset_view();
             }
-            if ui.add_enabled(has_series, egui::Button::selectable(vp.invert, "◐ Negatyw")).clicked() {
+            if ui.add_enabled(has_series, egui::Button::selectable(vp.invert, "Negatyw")).clicked() {
                 vp.invert = !vp.invert;
             }
-            let play_label = if vp.playing { "⏸ Stop" } else { "▶ Odtwarzaj" };
+            let play_label = if vp.playing { "Stop" } else { "Odtwarzaj" };
             if ui.add_enabled(has_series, egui::Button::new(play_label)).on_hover_text("Automatyczne przewijanie przekrojów (spacja)").clicked() {
                 vp.playing = !vp.playing;
             }
-            if ui.add_enabled(has_series, egui::Button::new("🗑 Usuń pomiary")).clicked() {
+            if ui.add_enabled(has_series, egui::Button::new("Usuń pomiary")).clicked() {
                 vp.measures.clear();
                 vp.pending_point = None;
             }
@@ -526,10 +526,10 @@ impl App {
             }
             ui.separator();
             ui.checkbox(&mut self.show_info, "Opisy na obrazie");
-            if ui.add_enabled(has_series, egui::Button::new("💾 Zapisz PNG")).on_hover_text("Zapisz bieżący obraz (np. żeby wysłać go Claude lub lekarzowi)").clicked() {
+            if ui.add_enabled(has_series, egui::Button::new("Zapisz PNG")).on_hover_text("Zapisz bieżący obraz (np. żeby wysłać go Claude lub lekarzowi)").clicked() {
                 self.export_png();
             }
-            if ui.button("❓ Pomoc").clicked() {
+            if ui.button("Pomoc").clicked() {
                 self.show_help = !self.show_help;
             }
         });
@@ -1001,7 +1001,7 @@ impl eframe::App for App {
 
 const HELP: &str = "\
 Jak oglądać:
-• Kółko myszy lub strzałki ↑ ↓ – kolejne przekroje (warstwy).
+• Kółko myszy lub strzałki na klawiaturze – kolejne przekroje (warstwy).
 • Przeciąganie lewym przyciskiem (narzędzie „Jasność/kontrast”) – w poziomie kontrast, w pionie jasność.
 • Prawy przycisk lub narzędzie „Przesuwanie” – przesuwanie obrazu.
 • Ctrl/Cmd + kółko albo gest szczypania – powiększenie.

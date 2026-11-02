@@ -1,0 +1,103 @@
+name: Budowanie
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Kompilacja (Apple Silicon i Intel)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+      - name: Pakiet .app
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          APP="dist/MRI Viewer.app"
+          mkdir -p "$APP/Contents/MacOS"
+          lipo -create -output "$APP/Contents/MacOS/mri-viewer" \
+            target/aarch64-apple-darwin/release/mri-viewer \
+            target/x86_64-apple-darwin/release/mri-viewer
+          sed "s/VERSION/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
+          codesign --force --deep -s - "$APP"
+          cp README.md dist/CZYTAJ-MNIE.md
+          cd dist && ditto -c -k --keepParent "MRI Viewer.app" ../MRI-Viewer-macOS.zip
+          cd .. && zip -j MRI-Viewer-macOS.zip dist/CZYTAJ-MNIE.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MRI-Viewer-macOS
+          path: MRI-Viewer-macOS.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/mri-viewer.exe dist/
+          Copy-Item README.md dist/CZYTAJ-MNIE.md
+          Compress-Archive -Path dist/* -DestinationPath MRI-Viewer-Windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MRI-Viewer-Windows
+          path: MRI-Viewer-Windows.zip
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - run: cargo build --release --locked
+      - run: tar -czf MRI-Viewer-Linux.tar.gz -C target/release mri-viewer -C ../.. README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MRI-Viewer-Linux
+          path: MRI-Viewer-Linux.tar.gz
+
+  release:
+    # po każdej zmianie na main aktualizujemy wydanie „najnowsza wersja”
+    if: github.event_name == 'push'
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publikacja wydania
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            gh release create "$TAG" --title "Przeglądarka MRI $TAG" --notes "Pobierz plik dla swojego systemu (Mac: MRI-Viewer-macOS.zip)." *.zip *.tar.gz
+          else
+            gh release delete latest --yes --cleanup-tag || true
+            gh release create latest --target "$GITHUB_SHA" --prerelease --title "Najnowsza wersja" \
+              --notes "Wersja zbudowana automatycznie z gałęzi main ($GITHUB_SHA). Mac: pobierz MRI-Viewer-macOS.zip." \
+              *.zip *.tar.gz
+          fi
