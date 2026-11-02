@@ -1,1 +1,4 @@
-{}
+{
+  "settings.language": "Język:",
+  "settings.language_system": "Język systemu ({name})"
+}

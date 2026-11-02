@@ -66,6 +66,8 @@ impl FontChoice {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct Settings {
+    /// Kod języka interfejsu; `None` = język systemu (a gdy nieobsługiwany – angielski).
+    pub language: Option<String>,
     /// Tryb dla profesjonalistów: więcej narzędzi, panel informacji, tagi DICOM.
     pub pro_mode: bool,
     pub start_at: StartAt,
@@ -105,6 +107,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            language: None,
             pro_mode: false,
             start_at: StartAt::Middle,
             hide_patient: false,
@@ -167,12 +170,14 @@ impl Settings {
             ]
             .into();
         });
+        crate::i18n::set_language(self.language.as_deref());
         self.apply_fonts(ctx);
     }
 
     /// Ustawia krój pisma – tylko gdy się zmienił, bo przebudowa czcionek jest kosztowna.
     fn apply_fonts(&self, ctx: &egui::Context) {
-        let key = format!("{:?}|{:?}", self.font, self.custom_font);
+        let cjk_lang = cjk_language();
+        let key = format!("{:?}|{:?}|{cjk_lang:?}", self.font, self.custom_font);
         let id = egui::Id::unique("applied_font_key");
         if ctx.data(|d| d.get_temp::<String>(id)).as_deref() == Some(key.as_str()) {
             return;
@@ -195,6 +200,11 @@ impl Settings {
             // strzałki i trójkąty są tylko w czcionce Hack – zawsze jako zapasowa
             if !fam.iter().any(|f| f == "Hack") {
                 fam.push("Hack".into());
+            }
+            // znaki chińskie, japońskie i koreańskie: czcionka systemowa wczytywana tylko dla tych języków
+            if let Some(bytes) = cjk_lang.and_then(cjk_font) {
+                fonts.font_data.insert("cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+                fam.push("cjk".into());
             }
         }
         ctx.set_fonts(fonts);
@@ -219,6 +229,21 @@ impl Settings {
         let before = format!("{self:?}");
         egui::ScrollArea::vertical().max_height(560.0).min_scrolled_height(480.0).show(ui, |ui| {
             ui.heading("Ogólne");
+            ui.horizontal(|ui| {
+                ui.label(t!("settings.language"));
+                let system = crate::i18n::find(&crate::i18n::system_language()).map_or("English", |l| l.native_name);
+                let system_label = t!("settings.language_system", name = system);
+                let current = match &self.language {
+                    None => system_label.clone(),
+                    Some(code) => crate::i18n::find(code).map_or(code.clone(), |l| l.native_name.to_string()),
+                };
+                egui::ComboBox::from_id_salt("language").selected_text(current).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.language, None, system_label);
+                    for lang in crate::i18n::LANGS {
+                        ui.selectable_value(&mut self.language, Some(lang.code.to_string()), lang.native_name);
+                    }
+                });
+            });
             ui.checkbox(&mut self.pro_mode, "Tryb profesjonalny")
                 .on_hover_text("Dodatkowe narzędzia (kąt, obszary ROI, sonda, wskaźnik 3D), mapy kolorów, panel tagów DICOM, histogram, dokładne wartości okna, współrzędne w mm.");
             ui.horizontal(|ui| {
@@ -359,6 +384,48 @@ fn load_font(path: &std::path::Path) -> Option<Vec<u8>> {
     let magic = bytes.get(0..4)?;
     let ok = matches!(magic, [0, 1, 0, 0] | b"OTTO" | b"true" | b"ttcf");
     ok.then_some(bytes)
+}
+
+/// Bieżący język, jeśli potrzebuje czcionki z pismem CJK.
+fn cjk_language() -> Option<&'static str> {
+    let code = crate::i18n::current();
+    matches!(code, "zh" | "ja" | "ko").then_some(code)
+}
+
+/// Systemowa czcionka z pismem danego języka (chiński, japoński, koreański).
+fn cjk_font(lang: &str) -> Option<Vec<u8>> {
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        match lang {
+            "ja" => &[
+                "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ],
+            "ko" => &["/System/Library/Fonts/AppleSDGothicNeo.ttc", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"],
+            _ => &[
+                "/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/System/Library/Fonts/STHeiti Light.ttc",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ],
+        }
+    } else if cfg!(target_os = "windows") {
+        match lang {
+            "ja" => &["C:\\Windows\\Fonts\\YuGothM.ttc", "C:\\Windows\\Fonts\\meiryo.ttc", "C:\\Windows\\Fonts\\msgothic.ttc"],
+            "ko" => &["C:\\Windows\\Fonts\\malgun.ttf", "C:\\Windows\\Fonts\\gulim.ttc"],
+            _ => &["C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\simsun.ttc"],
+        }
+    } else {
+        &[
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/OTF/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+        ]
+    };
+    candidates.iter().find_map(|p| load_font(std::path::Path::new(p)))
 }
 
 fn system_font() -> Option<Vec<u8>> {
