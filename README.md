@@ -2,7 +2,7 @@
 
 Prosty i szybki program do oglądania badań rezonansu magnetycznego (oraz innych badań w formacie DICOM, np. tomografii) skopiowanych z płyty z pracowni. Ma też wbudowany serwer MCP, dzięki któremu Claude (w aplikacji Claude Desktop lub w Claude Code) może sam przeglądać obrazy i pomagać w ich zrozumieniu.
 
-> **To narzędzie poglądowe, nie diagnostyczne.** Ani program, ani Claude nie zastępują opisu radiologa ani rozmowy z lekarzem.
+> **To narzędzie informacyjne i edukacyjne, a nie wyrób medyczny.** Nie służy do diagnozy, badań przesiewowych, monitorowania choroby ani podejmowania decyzji o leczeniu, a pomiary są orientacyjne. Ani program, ani Claude nie zastępują opisu radiologa ani rozmowy z lekarzem.
 
 ## Instalacja na Macu
 
@@ -29,7 +29,7 @@ Wersje dla Windows (`MRI-Viewer-Windows.zip`) i Linuksa (`MRI-Viewer-Linux.tar.g
    - **Jasność ▾** – gotowe ustawienia (automatyczna, z aparatu, większy/mniejszy kontrast), **I** – negatyw, **Obróć** – obrót i odbicia,
    - **Układ 1 / 2 / 4** – kilka okien obok siebie, np. T1 i T2 albo stare i nowe badanie. Shift + klik na serii wczytuje ją do kolejnego okna. Przy zaznaczonym **„Razem”** okna z tą samą płaszczyzną przewijają się razem, a przerywane **linie odniesienia** pokazują, gdzie przekrój z jednego okna przecina pozostałe,
    - lista **Płaszczyzna** pozwala obejrzeć rekonstrukcję w innej płaszczyźnie (najlepiej działa dla serii 3D z cienkimi warstwami).
-4. **Pomiary.** Narzędzie **Odległość** (M): przeciągnij od punktu do punktu, a wynik pojawi się w milimetrach. **Strzałka** (T) służy do opisania miejsca na obrazie. Kliknięty pomiar zostaje zaznaczony: można go przesuwać za środek, zmieniać końce za uchwyty i usunąć klawiszem **Delete** albo z menu pod prawym przyciskiem. **⌘Z / ⇧⌘Z** cofa i ponawia, a **Edycja → Usuń wszystkie pomiary** czyści wszystko. Kursor myszy zmienia się zależnie od narzędzia i tego, co jest pod nim.
+4. **Pomiary.** Narzędzie **Odległość** (M): przeciągnij od punktu do punktu, a orientacyjny wynik pojawi się w milimetrach (dokładność zależy od wielkości piksela i grubości warstwy). **Strzałka** (T) służy do opisania miejsca na obrazie. Kliknięty pomiar zostaje zaznaczony: można go przesuwać za środek, zmieniać końce za uchwyty i usunąć klawiszem **Delete** albo z menu pod prawym przyciskiem. **⌘Z / ⇧⌘Z** cofa i ponawia, a **Edycja → Usuń wszystkie pomiary** czyści wszystko. Kursor myszy zmienia się zależnie od narzędzia i tego, co jest pod nim.
 5. **Zapisywanie i eksport** (menu **Plik**): bieżący obraz (PNG/JPEG), widok razem z opisami i pomiarami, kopia widoku do schowka, cała seria jako osobne obrazy, animacja GIF, mozaika miniatur i tagi DICOM do pliku tekstowego.
 6. **Ustawienia** (⌘,): motyw jasny/ciemny, wielkość interfejsu i opisów, kolor pomiarów, co pokazywać na obrazie, kierunek i czułość kółka, prędkość odtwarzania, format eksportu, pamięć podręczna oraz ukrywanie danych osobowych pacjenta na ekranie (np. przy pokazywaniu komuś zrzutu).
 
@@ -47,7 +47,7 @@ Program korzysta ze zintegrowanej karty graficznej, która w zupełności wystar
 
 ## Podłączenie do Claude (MCP)
 
-Serwer MCP pozwala Claude samodzielnie: wypisać serie badania z parametrami, obejrzeć wybrany przekrój, zobaczyć całą serię jako mozaikę miniatur, zrobić rekonstrukcję w innej płaszczyźnie, zmierzyć odległość, policzyć statystyki jasności w obszarze i odczytać nagłówki DICOM.
+Serwer MCP pozwala Claude samodzielnie: wypisać serie badania z parametrami, obejrzeć wybrany przekrój, zobaczyć całą serię jako mozaikę miniatur, zrobić rekonstrukcję w innej płaszczyźnie, orientacyjnie zmierzyć odległość, policzyć statystyki jasności w obszarze i odczytać nagłówki DICOM.
 
 Poniższe przykłady zakładają, że program jest w folderze Programy, a badania w folderze `Pobrane/MRI`. Zamiast `TWOJA_NAZWA` wpisz nazwę swojego konta na Macu (widać ją w Finderze jako nazwę folderu domowego).
 

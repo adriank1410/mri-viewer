@@ -20,12 +20,15 @@ use crate::library::{self, Library, Plane, Series, Study, fmt_date};
 use crate::mpr;
 
 const INSTRUCTIONS: &str = "This server gives read-only access to medical imaging studies (DICOM, typically MRI) \
-stored on the user's computer. Workflow: call list_series first, then view_montage to get an overview of a series, \
-then view_slice for detail. Slice numbers are 1-based. Images are rendered as PNG with a window (brightness/contrast) \
-that you can change via window_center/window_width. IMPORTANT: this is a non-diagnostic viewing aid. When describing \
-findings, be careful and explicit about uncertainty, and remind the user that only a radiologist's report is \
-authoritative. Patient-identifying fields are hidden unless the server was started with --show-patient; \
-in that mode series that may have patient data burned into the pixels (screen captures, scanned documents, \
+stored on the user's computer, for informational and educational viewing. Workflow: call list_series first, then \
+view_montage to get an overview of a series, then view_slice for detail. Slice numbers are 1-based. Images are \
+rendered as PNG with a window (brightness/contrast) that you can change via window_center/window_width. \
+IMPORTANT: this software is a general-purpose image viewer, not a medical device. It is not intended for diagnosis, \
+screening, monitoring or treatment decisions, and its measurements and statistics are approximate. When describing \
+what is visible, explain anatomy and imaging terms in plain language, be explicit about uncertainty, do not present \
+your interpretation as a diagnosis, and remind the user that the radiologist's report and their doctor are \
+authoritative. Patient-identifying fields are hidden unless the server was started with --show-patient. While they \
+are hidden, series that may have patient data burned into the pixels (screen captures, scanned documents, \
 annotated images) cannot be viewed, and file paths are not shown.";
 
 #[derive(Clone)]
@@ -572,7 +575,7 @@ impl MriServer {
         ))]))
     }
 
-    #[tool(description = "Measure the distance in millimetres between two points (original pixel coordinates) in an image of a series, using its pixel spacing.")]
+    #[tool(description = "Measure the approximate distance in millimetres between two points (original pixel coordinates) in an image of a series, using its pixel spacing. Accuracy is limited by pixel size and slice thickness.")]
     async fn measure_distance(&self, Parameters(a): Parameters<DistanceArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
         let Some((sr, sc)) = se.pixel_spacing else {
