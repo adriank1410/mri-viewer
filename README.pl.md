@@ -10,7 +10,7 @@ Interfejs programu jest dostępny po polsku, angielsku, francusku, hiszpańsku, 
 
 ## Instalacja na Macu
 
-1. Wejdź w zakładkę [Releases](../../releases) i pobierz plik `MRI-Viewer-macOS.zip` z wydania oznaczonego jako **Latest build** (najnowsza wersja).
+1. Wejdź w zakładkę [Releases](../../releases) i pobierz plik `MRI-Viewer-macOS.zip` z najnowszej wersji (oznaczonej jako **Latest**, np. `v0.2.0`).
 2. Rozpakuj go (dwuklik) i przeciągnij `MRI Viewer.app` do folderu **Aplikacje**.
 3. Program nie jest podpisany certyfikatem Apple, więc przy pierwszym uruchomieniu macOS go zablokuje. Najprościej otworzyć aplikację **Terminal** i wkleić:
 
@@ -99,7 +99,7 @@ cargo build --release
 ./target/release/mri-viewer
 ```
 
-Na Linuksie do działania okna potrzebny jest pakiet `libxkbcommon-x11-0`. Każda zmiana na gałęzi `main` automatycznie buduje paczki dla macOS (uniwersalna: Apple Silicon i Intel), Windows i Linuksa i publikuje je jako wydanie **Latest build**.
+Na Linuksie do działania okna potrzebny jest pakiet `libxkbcommon-x11-0`. Każda zmiana na gałęzi `main` automatycznie buduje paczki dla macOS (uniwersalna: Apple Silicon i Intel), Windows i Linuksa i publikuje je jako wydanie testowe **Latest build**. Gdy zmieni się `version` w `Cargo.toml`, ta sama kompilacja jest też publikowana jako numerowana wersja (np. `v0.2.0`) z opisem z [CHANGELOG.md](CHANGELOG.md).
 
 ### Tłumaczenia
 

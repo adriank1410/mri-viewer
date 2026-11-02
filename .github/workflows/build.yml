@@ -84,25 +84,36 @@ jobs:
           path: MRI-Viewer-Linux.tar.gz
 
   release:
-    # po każdej zmianie na main aktualizujemy wydanie „najnowsza wersja”
+    # każda zmiana na main: wydanie „Latest build”; nowa wersja w Cargo.toml: wydanie vX.Y.Z z opisem z CHANGELOG.md
     if: github.event_name == 'push'
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          path: dist
           merge-multiple: true
       - name: Publikacja wydania
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
-            gh release create "$TAG" --title "MRI Viewer $TAG" --notes "Download the file for your system (Mac: MRI-Viewer-macOS.zip). Pobierz plik dla swojego systemu (Mac: MRI-Viewer-macOS.zip)." *.zip *.tar.gz
           else
+            TAG="v$VERSION"
+          fi
+          # opis wydania: sekcja „## X.Y.Z” z CHANGELOG.md
+          awk -v v="${TAG#v}" '$0 == "## " v {f=1; next} /^## / {f=0} f' CHANGELOG.md > notes.md
+          printf '\n---\nDownload the file for your system: Mac `MRI-Viewer-macOS.zip`, Windows `MRI-Viewer-Windows.zip`, Linux `MRI-Viewer-Linux.tar.gz`.\n' >> notes.md
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MRI Viewer ${TAG#v}" --notes-file notes.md --latest dist/*.zip dist/*.tar.gz
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             gh release delete latest --yes --cleanup-tag || true
-            gh release create latest --target "$GITHUB_SHA" --prerelease --title "Latest build" \
-              --notes "Built automatically from the main branch ($GITHUB_SHA). Mac: download MRI-Viewer-macOS.zip. Wersja zbudowana automatycznie z gałęzi main. Mac: pobierz MRI-Viewer-macOS.zip." \
-              *.zip *.tar.gz
+            gh release create latest --target "$GITHUB_SHA" --prerelease --latest=false --title "Latest build" \
+              --notes "Built automatically from the main branch ($GITHUB_SHA), with changes that may not be in a numbered release yet. Mac: download MRI-Viewer-macOS.zip." \
+              dist/*.zip dist/*.tar.gz
           fi
