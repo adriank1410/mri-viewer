@@ -29,7 +29,13 @@ macro_rules! lang {
 /// Dostępne języki. Pierwszy (angielski) jest zapasowy.
 pub static LANGS: &[Lang] = &[
     lang!("en", "English"),
+    lang!("de", "Deutsch"),
+    lang!("es", "Español"),
+    lang!("fr", "Français"),
+    lang!("it", "Italiano"),
     lang!("pl", "Polski"),
+    lang!("pt", "Português"),
+    lang!("uk", "Українська"),
 ];
 
 type Table = HashMap<String, &'static str>;

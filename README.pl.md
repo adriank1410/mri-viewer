@@ -6,7 +6,7 @@ Prosty i szybki program do oglądania badań rezonansu magnetycznego (oraz innyc
 
 > **To narzędzie informacyjne i edukacyjne, a nie wyrób medyczny.** Nie służy do diagnozy, badań przesiewowych, monitorowania choroby ani podejmowania decyzji o leczeniu, a pomiary są orientacyjne. Ani program, ani Claude nie zastępują opisu radiologa ani rozmowy z lekarzem.
 
-Interfejs programu jest dostępny w kilku językach. Program uruchamia się w języku komputera (a gdy ten nie jest obsługiwany – po angielsku), a język można zmienić w ustawieniach.
+Interfejs programu jest dostępny po polsku, angielsku, francusku, hiszpańsku, niemiecku, portugalsku, ukraińsku i włosku. Program uruchamia się w języku komputera (a gdy ten nie jest obsługiwany – po angielsku), a język można zmienić w ustawieniach.
 
 ## Instalacja na Macu
 

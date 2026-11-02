@@ -6,7 +6,7 @@ A simple, fast program for viewing MRI scans (and other DICOM studies, such as C
 
 > **This is an informational and educational tool, not a medical device.** It is not intended for diagnosis, screening, monitoring of disease or treatment decisions, and its measurements are approximate. Neither the program nor Claude replaces the radiologist's report or a conversation with your doctor.
 
-The program's interface is available in several languages. It starts in your computer's language (English if that language is not available), and you can change it in the settings.
+The program's interface is available in English, French, German, Italian, Polish, Portuguese, Spanish and Ukrainian. It starts in your computer's language (English if that language is not available), and you can change it in the settings.
 
 ## Installing on a Mac
 

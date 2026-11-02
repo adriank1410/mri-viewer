@@ -229,7 +229,7 @@ impl Settings {
         let before = format!("{self:?}");
         egui::ScrollArea::vertical().max_height(560.0).min_scrolled_height(480.0).show(ui, |ui| {
             ui.heading(t!("settings.section.general"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.language"));
                 let system = crate::i18n::find(&crate::i18n::system_language()).map_or("English", |l| l.native_name);
                 let system_label = t!("settings.language_system", name = system);
@@ -246,7 +246,7 @@ impl Settings {
             });
             ui.checkbox(&mut self.pro_mode, t!("settings.pro_mode.label"))
                 .on_hover_text(t!("settings.pro_mode.tooltip"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.start_at.label"));
                 ui.radio_value(&mut self.start_at, StartAt::Middle, t!("settings.start_at.middle"));
                 ui.radio_value(&mut self.start_at, StartAt::First, t!("settings.start_at.first"));
@@ -258,21 +258,21 @@ impl Settings {
             ui.add_space(8.0);
 
             ui.heading(t!("settings.section.appearance"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.theme.label"));
                 ui.radio_value(&mut self.theme, ThemeChoice::Dark, t!("settings.theme.dark"));
                 ui.radio_value(&mut self.theme, ThemeChoice::Light, t!("settings.theme.light"));
                 ui.radio_value(&mut self.theme, ThemeChoice::System, t!("settings.theme.system"));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.ui_scale"));
                 ui.add(egui::Slider::new(&mut self.ui_scale, 0.75..=2.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.text_size"));
                 ui.add(egui::Slider::new(&mut self.text_size, 11.0..=22.0).step_by(0.5).suffix(" pt"));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.font.label"));
                 egui::ComboBox::from_id_salt("font_choice")
                     .selected_text(self.font.label())
@@ -299,11 +299,11 @@ impl Settings {
             if !self.font_ok() {
                 ui.colored_label(egui::Color32::LIGHT_RED, t!("settings.font.load_failed"));
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.overlay_font"));
                 ui.add(egui::Slider::new(&mut self.overlay_font, 10.0..=22.0).step_by(1.0));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.annotation_color"));
                 ui.color_edit_button_srgb(&mut self.annotation_color);
             });
@@ -314,7 +314,7 @@ impl Settings {
             ui.checkbox(&mut self.smooth_interpolation, t!("settings.smooth_interpolation.label"))
                 .on_hover_text(t!("settings.smooth_interpolation.tooltip"));
             if self.pro_mode {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(t!("settings.default_colormap"));
                     egui::ComboBox::from_id_salt("default_cmap")
                         .selected_text(self.default_colormap.label())
@@ -329,15 +329,15 @@ impl Settings {
 
             ui.heading(t!("settings.section.mouse_playback"));
             ui.checkbox(&mut self.invert_scroll, t!("settings.invert_scroll"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.scroll_sensitivity"));
                 ui.add(egui::Slider::new(&mut self.scroll_sensitivity, 0.25..=4.0).logarithmic(true));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.cine_fps.label"));
                 ui.add(egui::Slider::new(&mut self.cine_fps, 1.0..=30.0).suffix(t!("settings.cine_fps.suffix")));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.cine_mode.label"));
                 ui.radio_value(&mut self.cine_mode, CineMode::Loop, t!("settings.cine_mode.loop"));
                 ui.radio_value(&mut self.cine_mode, CineMode::Bounce, t!("settings.cine_mode.bounce"));
@@ -346,13 +346,13 @@ impl Settings {
             ui.add_space(8.0);
 
             ui.heading(t!("settings.section.export"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.export_format.label"));
                 ui.radio_value(&mut self.export_format, ExportFormat::Png, t!("settings.export_format.png"));
                 ui.radio_value(&mut self.export_format, ExportFormat::Jpeg, "JPEG");
             });
             if self.export_format == ExportFormat::Jpeg {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(t!("settings.jpeg_quality"));
                     ui.add(egui::Slider::new(&mut self.jpeg_quality, 50..=100));
                 });
@@ -360,7 +360,7 @@ impl Settings {
             ui.add_space(8.0);
 
             ui.heading(t!("settings.section.performance"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.cache_mb.label"));
                 ui.add(egui::Slider::new(&mut self.cache_mb, 500..=8000).step_by(250.0).suffix(" MB"));
             });
