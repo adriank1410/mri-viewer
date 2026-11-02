@@ -1,5 +1,6 @@
 //! Okno programu (egui): lista serii, okna podglądu, menu, ustawienia, eksport.
 
+mod about;
 mod actions;
 mod annotations;
 mod export;
@@ -1263,12 +1264,7 @@ impl App {
         if self.show_about {
             let mut open = true;
             egui::Window::new("O programie").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
-                ui.heading("Przeglądarka MRI");
-                ui.label(format!("Wersja {}", env!("CARGO_PKG_VERSION")));
-                ui.label("Prosty podgląd badań DICOM z serwerem MCP dla Claude.");
-                ui.add_space(6.0);
-                ui.colored_label(Color32::from_rgb(230, 170, 80), "Narzędzie poglądowe – nie służy do diagnozy.");
-                ui.hyperlink_to("Kod źródłowy", "https://github.com/adriank1410/mri-viewer");
+                about::ui(ui);
             });
             self.show_about = open;
         }
@@ -1632,7 +1628,8 @@ pub fn run(folder: Option<PathBuf>) -> anyhow::Result<()> {
             .with_app_id("mri-viewer")
             .with_inner_size([1360.0, 860.0])
             .with_min_inner_size([720.0, 480.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(std::sync::Arc::new(app_icon())),
         persist_window: true,
         ..Default::default()
     };
@@ -1642,6 +1639,13 @@ pub fn run(folder: Option<PathBuf>) -> anyhow::Result<()> {
         Box::new(move |cc| Ok(Box::new(App::new(cc, folder)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Ikona programu (okno, Dock, pasek zadań).
+pub const ICON_PNG: &[u8] = include_bytes!("../../assets/icon-256.png");
+
+pub fn app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(ICON_PNG).unwrap_or_default()
 }
 
 /// Lokalizator (zwiadowczy obraz do planowania badania) – zwykle mało przydatny do oglądania.

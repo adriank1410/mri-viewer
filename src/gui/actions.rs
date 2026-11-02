@@ -439,6 +439,12 @@ pub mod native {
         _keep: Vec<Box<dyn std::any::Any>>,
     }
 
+    fn about_icon() -> Option<muda::Icon> {
+        let img = image::load_from_memory(crate::gui::ICON_PNG).ok()?.to_rgba8();
+        let (w, h) = img.dimensions();
+        muda::Icon::from_rgba(img.into_raw(), w, h).ok()
+    }
+
     pub fn install() -> NativeMenu {
         let menu = Menu::new();
         let mut keep: Vec<Box<dyn std::any::Any>> = Vec::new();
@@ -448,7 +454,11 @@ pub mod native {
             Some(AboutMetadata {
                 name: Some("Przeglądarka MRI".into()),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
-                comments: Some("Narzędzie poglądowe, nie diagnostyczne.".into()),
+                // pusty numer kompilacji – inaczej macOS pokazuje „0.2.0 (0.2.0)”
+                short_version: Some(String::new()),
+                copyright: Some(format!("© 2026 {}", crate::gui::about::AUTHOR)),
+                credits: Some(crate::gui::about::credits()),
+                icon: about_icon(),
                 ..Default::default()
             }),
         );

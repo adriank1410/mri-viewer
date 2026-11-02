@@ -32,7 +32,8 @@ jobs:
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           APP="dist/MRI Viewer.app"
-          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
           lipo -create -output "$APP/Contents/MacOS/mri-viewer" \
             target/aarch64-apple-darwin/release/mri-viewer \
             target/x86_64-apple-darwin/release/mri-viewer
