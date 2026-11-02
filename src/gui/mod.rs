@@ -105,14 +105,6 @@ impl App {
             .and_then(|s| eframe::get_value(s, settings::STORAGE_KEY))
             .unwrap_or_default();
         settings.apply(&cc.egui_ctx);
-        // strzałki i trójkąty są tylko w czcionce Hack – używamy jej jako zapasowej
-        let mut fonts = egui::FontDefinitions::default();
-        if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-            if !fam.iter().any(|f| f == "Hack") {
-                fam.push("Hack".into());
-            }
-        }
-        cc.egui_ctx.set_fonts(fonts);
         let (thumb_tx, thumb_rx) = channel();
         let (shot_tx, shot_rx) = channel();
         let mut app = Self {
@@ -925,63 +917,159 @@ impl App {
         }
     }
 
+    /// Pasek narzędzi w jednej linii. Gdy brakuje miejsca (wąskie okno, tryb PRO, duży tekst),
+    /// zwija kolejno: pomiary do listy, przyciski obrazu do menu „Obraz”, a na końcu wszystkie narzędzia.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let pro = self.settings.pro_mode;
-        ui.horizontal_wrapped(|ui| {
-            let tools: &[(Tool, Action)] = &[
-                (Tool::Window, Action::ToolWindow),
-                (Tool::Pan, Action::ToolPan),
-                (Tool::Zoom, Action::ToolZoom),
-                (Tool::Line, Action::ToolLine),
-                (Tool::Arrow, Action::ToolArrow),
-                (Tool::Angle, Action::ToolAngle),
-                (Tool::Ellipse, Action::ToolEllipse),
-                (Tool::Rect, Action::ToolRect),
-                (Tool::Probe, Action::ToolProbe),
-                (Tool::Cursor3d, Action::ToolCursor3d),
-            ];
-            for (t, _) in tools {
-                if t.pro() && !pro {
-                    continue;
+        let tools: Vec<Tool> = [
+            Tool::Window,
+            Tool::Pan,
+            Tool::Zoom,
+            Tool::Line,
+            Tool::Arrow,
+            Tool::Angle,
+            Tool::Ellipse,
+            Tool::Rect,
+            Tool::Probe,
+            Tool::Cursor3d,
+        ]
+        .into_iter()
+        .filter(|t| pro || !t.pro())
+        .collect();
+        let basic = [Tool::Window, Tool::Pan, Tool::Zoom];
+        let measure: Vec<Tool> = tools.iter().copied().filter(|t| !basic.contains(t)).collect();
+        let has = self.viewports[self.active].series_id.is_some();
+        let n = self.viewports.len();
+
+        // szerokości w punktach, liczone z prawdziwej czcionki przycisków
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let pad = ui.spacing().button_padding.x * 2.0 + ui.spacing().item_spacing.x;
+        let ctx = ui.ctx().clone();
+        let tw = |s: &str| -> f32 { ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) + pad };
+        let sep = ui.spacing().item_spacing.x * 2.0 + 1.0;
+        let longest_measure = measure.iter().map(|t| tw(t.label())).fold(0.0, f32::max);
+        let w_tools_full: f32 = tools.iter().map(|t| tw(t.label())).sum();
+        let w_tools_mid: f32 = basic.iter().map(|t| tw(t.label())).sum::<f32>() + longest_measure + tw(" ▾");
+        let plane_w = self.plane_label(false).map(|l| tw(&l) + 16.0).unwrap_or(0.0);
+        let plane_w_short = self.plane_label(true).map(|l| tw(&l) + 16.0).unwrap_or(0.0);
+        let w_view_full = if has { tw("Reset") + tw("Negatyw") + tw("Obróć") + tw("Jasność ▾") + plane_w } else { tw("Reset") + tw("Negatyw") + tw("Obróć") };
+        let w_view_min = tw("Obraz ▾") + if has { tw("Jasność ▾") + plane_w_short } else { 0.0 };
+        let w_layout = tw("1") + tw("2") + tw("4") + if n > 1 { tw("Razem") + 20.0 } else { 0.0 };
+        let w_right = tw("Układ:") + w_layout + tw("Tryb PRO") + tw("Ustawienia") + sep * 2.0;
+        // poziom 4 (najwęższy): bez napisu „Układ:”, „PRO” zamiast „Tryb PRO”, ustawienia tylko w menu
+        let w_tools_min = tools.iter().map(|t| tw(t.label())).fold(0.0, f32::max) + tw(" ▾");
+        let avail = ui.available_width() - 8.0;
+        let level = if w_tools_full + sep + w_view_full + w_right <= avail {
+            0
+        } else if w_tools_mid + sep + w_view_full + w_right <= avail {
+            1
+        } else if w_tools_mid + sep + w_view_min + w_right <= avail {
+            2
+        } else if w_tools_min + sep + w_view_min + w_right <= avail {
+            3
+        } else {
+            4
+        };
+
+        ui.horizontal(|ui| {
+            // --- narzędzia ---
+            match level {
+                0 => {
+                    for t in &tools {
+                        ui.selectable_value(&mut self.tool, *t, t.label()).on_hover_text(t.hint());
+                    }
                 }
-                ui.selectable_value(&mut self.tool, *t, t.label()).on_hover_text(t.hint());
+                1 | 2 => {
+                    for t in basic {
+                        ui.selectable_value(&mut self.tool, t, t.label()).on_hover_text(t.hint());
+                    }
+                    let active = measure.contains(&self.tool);
+                    let title = if active { format!("{} ▾", self.tool.label()) } else { "Pomiary ▾".to_string() };
+                    self.tool_menu(ui, &measure, title, active);
+                }
+                _ => {
+                    let title = format!("{} ▾", self.tool.label());
+                    self.tool_menu(ui, &tools, title, true);
+                }
             }
             ui.separator();
-            let has = self.viewports[self.active].series_id.is_some();
+            // --- obraz ---
             ui.add_enabled_ui(has, |ui| {
-                if ui.button("Reset").on_hover_text("Przywróć jasność, kontrast, powiększenie i obrót (R lub dwuklik)").clicked() {
-                    self.pending.push(Action::ResetView);
-                }
-                let inv = self.viewports[self.active].invert;
-                if ui.selectable_label(inv, "Negatyw").on_hover_text("Odwróć kolory (I)").clicked() {
-                    self.pending.push(Action::Invert);
-                }
-                if ui.button("Obróć").on_hover_text("Obróć o 90° w prawo").clicked() {
-                    self.pending.push(Action::RotateRight);
+                if level < 2 {
+                    if ui.button("Reset").on_hover_text("Przywróć jasność, kontrast, powiększenie i obrót (R lub dwuklik)").clicked() {
+                        self.pending.push(Action::ResetView);
+                    }
+                    let inv = self.viewports[self.active].invert;
+                    if ui.selectable_label(inv, "Negatyw").on_hover_text("Odwróć kolory (I)").clicked() {
+                        self.pending.push(Action::Invert);
+                    }
+                    if ui.button("Obróć").on_hover_text("Obróć o 90° w prawo").clicked() {
+                        self.pending.push(Action::RotateRight);
+                    }
+                } else {
+                    ui.menu_button("Obraz ▾", |ui| {
+                        for a in [Action::ResetView, Action::Invert, Action::RotateRight, Action::RotateLeft, Action::FlipH, Action::FlipV] {
+                            if ui.button(a.label()).clicked() {
+                                self.pending.push(a);
+                                ui.close();
+                            }
+                        }
+                    });
                 }
                 self.window_menu(ui);
-                self.plane_menu(ui);
+                self.plane_menu(ui, level >= 2);
             });
-            ui.separator();
-            ui.label("Układ:");
-            let n = self.viewports.len();
-            let ctx = ui.ctx().clone();
-            for (k, label, tip) in [(1, "1", "Jedno okno"), (2, "2", "Dwa okna obok siebie"), (4, "4", "Cztery okna")] {
-                if ui.selectable_label(n == k, label).on_hover_text(tip).clicked() {
-                    self.set_layout(k, &ctx);
+            // --- układ i ustawienia, dosunięte do prawej ---
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if level < 4 && ui.button("Ustawienia").clicked() {
+                    self.pending.push(Action::Settings);
+                }
+                let pro_label = if level < 4 { "Tryb PRO" } else { "PRO" };
+                if ui.selectable_label(pro, pro_label).on_hover_text("Tryb profesjonalny: więcej narzędzi i informacji").clicked() {
+                    self.pending.push(Action::TogglePro);
+                }
+                ui.separator();
+                if n > 1 && ui.checkbox(&mut self.settings.sync_scroll, "Razem").on_hover_text("Przewijaj okna razem (te same miejsca w ciele)").changed() {
+                    self.settings_dirty = true;
+                }
+                let ctx = ui.ctx().clone();
+                for (k, label, tip) in [(4, "4", "Cztery okna"), (2, "2", "Dwa okna obok siebie"), (1, "1", "Jedno okno")] {
+                    if ui.selectable_label(n == k, label).on_hover_text(tip).clicked() {
+                        self.set_layout(k, &ctx);
+                    }
+                }
+                if level < 4 {
+                    ui.label("Układ:");
+                }
+            });
+        });
+    }
+
+    /// Napis na liście płaszczyzn (None, gdy lista nie jest pokazywana).
+    fn plane_label(&self, compact: bool) -> Option<String> {
+        let series = self.active_series()?;
+        if mpr::available_planes(&series).is_empty() {
+            return None;
+        }
+        let prefix = if compact { "" } else { "Płaszczyzna: " };
+        Some(match self.viewports[self.active].plane {
+            ViewPlane::Native => format!("{prefix}{}", series.plane.pl()),
+            ViewPlane::Reformat(p) => format!("{prefix}{} (rekonstr.)", p.pl()),
+        })
+    }
+
+    /// Lista rozwijana z narzędziami (gdy nie mieszczą się na pasku).
+    fn tool_menu(&mut self, ui: &mut egui::Ui, tools: &[Tool], title: String, highlight: bool) {
+        let text = if highlight { egui::RichText::new(title).color(ui.visuals().selection.stroke.color) } else { egui::RichText::new(title) };
+        let resp = ui.menu_button(text, |ui| {
+            for t in tools {
+                if ui.selectable_label(self.tool == *t, t.label()).on_hover_text(t.hint()).clicked() {
+                    self.tool = *t;
+                    ui.close();
                 }
             }
-            if n > 1 && ui.checkbox(&mut self.settings.sync_scroll, "Razem").on_hover_text("Przewijaj okna razem (te same miejsca w ciele)").changed() {
-                self.settings_dirty = true;
-            }
-            ui.separator();
-            if ui.selectable_label(pro, "Tryb PRO").on_hover_text("Tryb profesjonalny: więcej narzędzi i informacji").clicked() {
-                self.pending.push(Action::TogglePro);
-            }
-            if ui.button("Ustawienia").clicked() {
-                self.pending.push(Action::Settings);
-            }
         });
+        resp.response.on_hover_text("Wybierz narzędzie");
     }
 
     fn window_menu(&mut self, ui: &mut egui::Ui) {
@@ -1053,18 +1141,15 @@ impl App {
         });
     }
 
-    fn plane_menu(&mut self, ui: &mut egui::Ui) {
+    fn plane_menu(&mut self, ui: &mut egui::Ui, compact: bool) {
         let vi = self.active;
         let Some(series) = self.active_series() else { return };
         let planes = mpr::available_planes(&series);
         if planes.is_empty() {
             return;
         }
+        let current = self.plane_label(compact).unwrap_or_default();
         let vp = &mut self.viewports[vi];
-        let current = match vp.plane {
-            ViewPlane::Native => format!("Płaszczyzna: {}", series.plane.pl()),
-            ViewPlane::Reformat(p) => format!("Płaszczyzna: {} (rekonstr.)", p.pl()),
-        };
         egui::ComboBox::from_id_salt("plane")
             .selected_text(current)
             .show_ui(ui, |ui| {
