@@ -1,0 +1,32 @@
+[package]
+name = "mri-viewer"
+version = "0.1.0"
+edition = "2024"
+description = "Prosta przeglądarka badań MRI/CT (DICOM) z serwerem MCP dla Claude"
+license = "MIT"
+
+[dependencies]
+dicom-core = "0.10"
+dicom-object = "0.10"
+dicom-dictionary-std = "0.10"
+dicom-pixeldata = { version = "0.10", features = ["openjp2", "image"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
+rfd = "0.17"
+image = { version = "0.25", default-features = false, features = ["png"] }
+rmcp = { version = "3.8", features = ["server", "transport-io", "macros", "schemars"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+base64 = "0.22"
+anyhow = "1"
+rayon = "1"
+walkdir = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
