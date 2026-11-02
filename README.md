@@ -96,3 +96,13 @@ cargo build --release
 ```
 
 Na Linuksie do działania okna potrzebny jest pakiet `libxkbcommon-x11-0`. Każda zmiana na gałęzi `main` automatycznie buduje paczki dla macOS (uniwersalna: Apple Silicon i Intel), Windows i Linuksa i publikuje je jako wydanie „Najnowsza wersja”.
+
+## Autor i licencja
+
+Autor: Adrian Kwiatkowski ([adriankwiatkowski.eu](https://adriankwiatkowski.eu), kontakt@adriankwiatkowski.eu).
+
+Program jest udostępniany na zasadach licencji [MIT](LICENSE-MIT) lub [Apache 2.0](LICENSE-APACHE), do wyboru. Licencje bibliotek, z których korzysta (w tym OpenJPEG na licencji BSD-2-Clause), są zebrane w pliku [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), generowanym skryptem `scripts/third_party_licenses.py`. Pliki licencji są też dołączone do każdej paczki do pobrania.
+
+Wnosząc zmiany do repozytorium, zgadzasz się na udostępnienie ich na tych samych dwóch licencjach.
+
+DICOM® jest zastrzeżonym znakiem towarowym National Electrical Manufacturers Association (NEMA). Program nie jest powiązany z NEMA ani przez nią zatwierdzany.

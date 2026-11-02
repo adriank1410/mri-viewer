@@ -3,7 +3,10 @@ name = "mri-viewer"
 version = "0.2.0"
 edition = "2024"
 description = "Prosta przeglądarka badań MRI/CT (DICOM) z serwerem MCP dla Claude"
-license = "MIT"
+license = "MIT OR Apache-2.0"
+authors = ["Adrian Kwiatkowski <contact@adriankwiatkowski.eu>"]
+repository = "https://github.com/adriank1410/mri-viewer"
+homepage = "https://adriankwiatkowski.eu"
 
 [dependencies]
 dicom-core = "0.10"

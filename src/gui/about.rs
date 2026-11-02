@@ -14,7 +14,7 @@ pub fn credits() -> String {
         "Przeglądarka badań MRI i innych obrazów DICOM z serwerem MCP dla Claude.\n\n\
          Autor: {AUTHOR}\n{}\n{EMAIL}\n\n\
          Narzędzie poglądowe – nie służy do diagnozy.\n\
-         Licencja MIT · {}",
+         Licencja MIT lub Apache-2.0 · {}",
         WEBSITE.trim_start_matches("https://"),
         REPO.trim_start_matches("https://"),
     )
@@ -35,7 +35,7 @@ pub fn ui(ui: &mut egui::Ui) {
         ui.label(format!("Autor: {AUTHOR}"));
         ui.hyperlink_to(WEBSITE.trim_start_matches("https://"), WEBSITE);
         ui.hyperlink_to(EMAIL, format!("mailto:{EMAIL}"));
-        ui.hyperlink_to("Kod źródłowy (licencja MIT)", REPO);
+        ui.hyperlink_to("Kod źródłowy (licencja MIT lub Apache-2.0)", REPO);
         ui.add_space(8.0);
         ui.colored_label(Color32::from_rgb(230, 170, 80), "Narzędzie poglądowe – nie służy do diagnozy.");
     });

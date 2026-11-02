@@ -40,8 +40,9 @@ jobs:
           sed "s/VERSION/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
           codesign --force --deep -s - "$APP"
           cp README.md dist/CZYTAJ-MNIE.md
+          cp LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md dist/
           cd dist && ditto -c -k --keepParent "MRI Viewer.app" ../MRI-Viewer-macOS.zip
-          cd .. && zip -j MRI-Viewer-macOS.zip dist/CZYTAJ-MNIE.md
+          cd .. && zip -j MRI-Viewer-macOS.zip dist/CZYTAJ-MNIE.md dist/LICENSE-MIT dist/LICENSE-APACHE dist/THIRD_PARTY_LICENSES.md
       - uses: actions/upload-artifact@v4
         with:
           name: MRI-Viewer-macOS
@@ -59,6 +60,7 @@ jobs:
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item target/release/mri-viewer.exe dist/
           Copy-Item README.md dist/CZYTAJ-MNIE.md
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, THIRD_PARTY_LICENSES.md dist/
           Compress-Archive -Path dist/* -DestinationPath MRI-Viewer-Windows.zip
       - uses: actions/upload-artifact@v4
         with:
@@ -73,7 +75,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
       - run: cargo build --release --locked
-      - run: tar -czf MRI-Viewer-Linux.tar.gz -C target/release mri-viewer -C ../.. README.md
+      - run: tar -czf MRI-Viewer-Linux.tar.gz -C target/release mri-viewer -C ../.. README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md
       - uses: actions/upload-artifact@v4
         with:
           name: MRI-Viewer-Linux
