@@ -55,15 +55,18 @@ enum InfoTab {
 }
 
 /// Gotowe ustawienia okna (szerokość, poziom) dla tomografii.
-const CT_PRESETS: &[(&str, f32, f32)] = &[
-    ("Mózg", 40.0, 80.0),
-    ("Krwiak / tkanki mózgu", 75.0, 215.0),
-    ("Tkanki miękkie", 40.0, 400.0),
-    ("Śródpiersie", 50.0, 350.0),
-    ("Wątroba", 60.0, 150.0),
-    ("Płuca", -600.0, 1500.0),
-    ("Kości", 400.0, 1800.0),
-];
+/// Funkcja, nie stała: nazwy są tłumaczone w chwili rysowania (język może się zmienić w trakcie pracy).
+fn ct_presets() -> [(&'static str, f32, f32); 7] {
+    [
+        (t!("app.window_menu.ct.brain"), 40.0, 80.0),
+        (t!("app.window_menu.ct.subdural"), 75.0, 215.0),
+        (t!("app.window_menu.ct.soft_tissue"), 40.0, 400.0),
+        (t!("app.window_menu.ct.mediastinum"), 50.0, 350.0),
+        (t!("app.window_menu.ct.liver"), 60.0, 150.0),
+        (t!("app.window_menu.ct.lung"), -600.0, 1500.0),
+        (t!("app.window_menu.ct.bone"), 400.0, 1800.0),
+    ]
+}
 
 pub struct App {
     lib: Option<Arc<Library>>,
@@ -90,7 +93,8 @@ pub struct App {
     show_about: bool,
     show_connect: bool,
     connect_show_patient: bool,
-    connect_msg: String,
+    /// Wynik dodania do Claude Desktop (ścieżka pliku albo błąd) – napis tworzony przy rysowaniu, w bieżącym języku.
+    connect_msg: Option<Result<PathBuf, String>>,
     status: String,
     hover_status: String,
     job: JobHandle,
@@ -118,6 +122,8 @@ impl App {
             .and_then(|s| eframe::get_value(s, settings::STORAGE_KEY))
             .unwrap_or_default();
         settings.apply(&cc.egui_ctx);
+        // tytuł okna w języku z ustawień (przy tworzeniu okna język nie był jeszcze znany)
+        cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Title(t!("app.title").to_string()));
         let (thumb_tx, thumb_rx) = channel();
         let (shot_tx, shot_rx) = channel();
         let mut app = Self {
@@ -144,7 +150,7 @@ impl App {
             show_about: false,
             show_connect: false,
             connect_show_patient: false,
-            connect_msg: String::new(),
+            connect_msg: None,
             status: String::new(),
             hover_status: String::new(),
             job: Arc::new(Mutex::new(None)),
@@ -220,7 +226,7 @@ impl App {
     }
 
     fn choose_folder(&mut self, ctx: &egui::Context) {
-        let mut dlg = rfd::FileDialog::new().set_title("Wybierz folder z badaniem (np. kopię płyty)");
+        let mut dlg = rfd::FileDialog::new().set_title(t!("app.dialog.choose_study_folder"));
         if let Some(f) = self.folder.clone().or_else(|| self.settings.last_folder.clone().map(PathBuf::from)) {
             dlg = dlg.set_directory(f);
         }
@@ -230,7 +236,7 @@ impl App {
     }
 
     fn choose_file(&mut self, ctx: &egui::Context) {
-        if let Some(f) = rfd::FileDialog::new().set_title("Wybierz plik DICOM").pick_file() {
+        if let Some(f) = rfd::FileDialog::new().set_title(t!("app.dialog.choose_dicom_file")).pick_file() {
             // otwieramy cały folder, w którym leży plik – seria zwykle składa się z wielu plików
             if let Some(dir) = f.parent() {
                 self.open_folder(dir.to_path_buf(), ctx);
@@ -435,7 +441,7 @@ impl App {
                         Some((f, rf.spacing, pl))
                     }
                     Err(e) => {
-                        self.status = format!("Rekonstrukcja niemożliwa: {e}");
+                        self.status = t!("app.status.reformat_failed", error = e);
                         vp.plane = ViewPlane::Native;
                         None
                     }
@@ -624,13 +630,13 @@ impl App {
                     settings::ExportFormat::Png
                 };
                 self.status = match export::save_image(&out, &path, fmt, self.settings.jpeg_quality) {
-                    Ok(()) => format!("Zapisano {}", path.display()),
-                    Err(e) => format!("Błąd zapisu: {e:#}"),
+                    Ok(()) => t!("app.status.saved", path = path.display()),
+                    Err(e) => t!("app.status.save_error", error = format!("{e:#}")),
                 };
             }
             ShotPurpose::Clipboard => {
                 self.status = match export::copy_to_clipboard(&out) {
-                    Ok(()) => "Skopiowano widok do schowka".into(),
+                    Ok(()) => t!("app.status.view_copied").into(),
                     Err(e) => format!("{e:#}"),
                 };
             }
@@ -641,7 +647,7 @@ impl App {
         let ext = self.settings.export_format.ext();
         rfd::FileDialog::new()
             .set_file_name(format!("{name}.{ext}"))
-            .add_filter("Obraz", &[ext])
+            .add_filter(t!("app.dialog.filter_image"), &[ext])
             .save_file()
     }
 
@@ -697,12 +703,12 @@ impl App {
             Action::Layout4 => self.set_layout(4, ctx),
             Action::Undo => {
                 if !self.store.undo() {
-                    self.status = "Nie ma czego cofnąć".into();
+                    self.status = t!("app.status.nothing_to_undo").into();
                 }
             }
             Action::Redo => {
                 if !self.store.redo() {
-                    self.status = "Nie ma czego ponowić".into();
+                    self.status = t!("app.status.nothing_to_redo").into();
                 }
             }
             Action::DeleteSelected => {
@@ -712,7 +718,7 @@ impl App {
                 } else if vp.creating.take().is_some() {
                     vp.angle_stage = 0;
                 } else {
-                    self.status = "Najpierw kliknij pomiar, aby go zaznaczyć".into();
+                    self.status = t!("app.status.select_measurement_first").into();
                 }
             }
             Action::DeleteSliceAnnotations => {
@@ -730,7 +736,7 @@ impl App {
                 if !self.settings.pro_mode {
                     self.settings.pro_mode = true;
                     self.settings_dirty = true;
-                    self.status = "Włączono tryb profesjonalny".into();
+                    self.status = t!("app.status.pro_enabled").into();
                 }
                 self.tool = match a {
                     Action::ToolAngle => Tool::Angle,
@@ -795,18 +801,18 @@ impl App {
             Action::SaveImage => {
                 if let Some((f, sp, _)) = self.current_frame(vi, &series) {
                     let o = self.render_opts(vi);
-                    let name = format!("{}_obraz{:03}", export::series_base_name(&series), self.viewports[vi].position() + 1);
+                    let name = t!("app.file.image", series = export::series_base_name(&series), n = format!("{:03}", self.viewports[vi].position() + 1));
                     if let Some(path) = self.save_dialog(&name) {
                         let img = export::render_image(&f, sp, &o, None);
                         self.status = match export::save_image(&img, &path, self.settings.export_format, self.settings.jpeg_quality) {
-                            Ok(()) => format!("Zapisano {}", path.display()),
-                            Err(e) => format!("Błąd zapisu: {e:#}"),
+                            Ok(()) => t!("app.status.saved", path = path.display()),
+                            Err(e) => t!("app.status.save_error", error = format!("{e:#}")),
                         };
                     }
                 }
             }
             Action::SaveView => {
-                let name = format!("{}_widok{:03}", export::series_base_name(&series), vp.position() + 1);
+                let name = t!("app.file.view", series = export::series_base_name(&series), n = format!("{:03}", vp.position() + 1));
                 if let Some(path) = self.save_dialog(&name) {
                     self.request_view_shot(ctx, ShotPurpose::Save(path));
                 }
@@ -815,7 +821,7 @@ impl App {
             Action::ExportSeries => {
                 if export::busy(&self.job) {
                     self.status = export::BUSY_MSG.into();
-                } else if let Some(dir) = rfd::FileDialog::new().set_title("Wybierz folder na obrazy serii").pick_folder() {
+                } else if let Some(dir) = rfd::FileDialog::new().set_title(t!("app.dialog.choose_export_folder")).pick_folder() {
                     let o = self.render_opts(vi);
                     export::export_series(series, self.cache.clone(), dir, o, self.settings.export_format, self.settings.jpeg_quality, self.job.clone());
                 }
@@ -830,7 +836,7 @@ impl App {
                 }
             }
             Action::ExportMontage => {
-                let name = format!("{}_mozaika.png", export::series_base_name(&series));
+                let name = format!("{}.png", t!("app.file.montage", series = export::series_base_name(&series)));
                 if export::busy(&self.job) {
                     self.status = export::BUSY_MSG.into();
                 } else if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file() {
@@ -840,13 +846,13 @@ impl App {
             }
             Action::ExportTags => {
                 let idx = if vp.plane == ViewPlane::Native { vp.slice } else { series.slices.len() / 2 };
-                let name = format!("{}_tagi.txt", export::series_base_name(&series));
-                if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("Tekst", &["txt"]).save_file() {
+                let name = format!("{}.txt", t!("app.file.tags", series = export::series_base_name(&series)));
+                if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter(t!("app.dialog.filter_text"), &["txt"]).save_file() {
                     self.status = match imaging::dump_tags(&series.slices[idx].path, self.settings.hide_patient)
                         .and_then(|t| Ok(std::fs::write(&path, t)?))
                     {
-                        Ok(()) => format!("Zapisano {}", path.display()),
-                        Err(e) => format!("Błąd zapisu: {e:#}"),
+                        Ok(()) => t!("app.status.saved", path = path.display()),
+                        Err(e) => t!("app.status.save_error", error = format!("{e:#}")),
                     };
                 }
             }
@@ -933,11 +939,11 @@ impl App {
 
     fn patient_line(&self, st: &Study) -> String {
         if self.settings.hide_patient || self.shot_hide {
-            let mut s = String::from("Pacjent ukryty");
             if !st.sex.is_empty() || !st.age.is_empty() {
-                s.push_str(&format!(" ({} {})", st.sex, st.age.trim_start_matches('0')));
+                t!("app.patient.hidden_sex_age", sex = st.sex, age = st.age.trim_start_matches('0'))
+            } else {
+                t!("app.patient.hidden").to_string()
             }
-            s
         } else if st.patient_name.is_empty() {
             String::new()
         } else {
@@ -952,22 +958,22 @@ impl App {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         ui.add_space(6.0);
-        if ui.add_sized([ui.available_width(), 30.0], egui::Button::new("Otwórz folder z badaniem…")).clicked() {
+        if ui.add_sized([ui.available_width(), 30.0], egui::Button::new(t!("app.sidebar.open_folder"))).clicked() {
             self.pending.push(Action::OpenFolder);
         }
         if self.scan_rx.is_some() {
             let (a, b) = self.scan_progress;
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(if b > 0 { format!("Czytam pliki… {a}/{b}") } else { "Szukam plików…".into() });
+                ui.label(if b > 0 { t!("app.sidebar.reading_files", done = a, total = b) } else { t!("app.sidebar.searching_files").into() });
             });
             return;
         }
         let Some(lib) = self.lib.clone() else { return };
         ui.separator();
         if lib.studies.is_empty() {
-            ui.colored_label(Color32::LIGHT_RED, "W tym folderze nie znaleziono obrazów DICOM.");
-            ui.small("Upewnij się, że wskazujesz folder skopiowany z płyty, a nie np. sam program do przeglądania z płyty.");
+            ui.colored_label(Color32::LIGHT_RED, t!("app.sidebar.no_dicom"));
+            ui.small(t!("app.sidebar.no_dicom_hint"));
             return;
         }
         let mut clicked: Option<(usize, bool)> = None;
@@ -976,7 +982,7 @@ impl App {
                 let head = format!(
                     "{}  {}",
                     fmt_date(&st.date),
-                    if st.description.is_empty() { "Badanie" } else { &st.description }
+                    if st.description.is_empty() { t!("app.sidebar.study_untitled") } else { &st.description }
                 );
                 egui::CollapsingHeader::new(egui::RichText::new(head).strong())
                     .id_salt(&st.uid)
@@ -1014,25 +1020,24 @@ impl App {
                                         ui.painter().circle_filled(rect.min + Vec2::new(8.0 + k as f32 * 10.0, 8.0), 4.0, c);
                                     }
                                     ui.vertical(|ui| {
-                                        let desc = if se.description.is_empty() { "(bez opisu)" } else { &se.description };
+                                        let desc = if se.description.is_empty() { t!("app.sidebar.series_untitled") } else { &se.description };
                                         let t = egui::RichText::new(format!(
                                             "{}{}",
                                             se.number.map(|n| format!("{n}. ")).unwrap_or_default(),
                                             desc
                                         ));
                                         ui.label(if in_views.is_empty() { t } else { t.strong() });
-                                        ui.small(format!(
-                                            "{} · {} {}",
-                                            se.plane.pl(),
-                                            se.slices.len(),
-                                            library::plural_obraz(se.slices.len())
+                                        ui.small(crate::i18n::trn_args(
+                                            "app.sidebar.series_info",
+                                            se.slices.len() as u64,
+                                            &[("plane", &se.plane.pl())],
                                         ));
                                         if se.may_have_burned_in_text {
-                                            ui.small(egui::RichText::new("Może zawierać wpisane dane pacjenta").color(Color32::from_rgb(230, 170, 80)))
-                                                .on_hover_text("Zrzut ekranu, skan dokumentu albo obraz z opisami. Przez MCP Claude go nie zobaczy, chyba że włączysz pokazywanie danych pacjenta.");
+                                            ui.small(egui::RichText::new(t!("app.sidebar.burned_in")).color(Color32::from_rgb(230, 170, 80)))
+                                                .on_hover_text(t!("app.sidebar.burned_in_tip"));
                                         }
                                         if let Some(err) = self.errors.lock().unwrap_or_else(|e| e.into_inner()).get(&se.id) {
-                                            ui.small(egui::RichText::new(format!("Błąd: {err}")).color(Color32::LIGHT_RED));
+                                            ui.small(egui::RichText::new(t!("app.sidebar.error", error = err)).color(Color32::LIGHT_RED));
                                         }
                                     });
                                 })
@@ -1041,10 +1046,7 @@ impl App {
                             if resp.hovered() {
                                 ui.painter().rect_stroke(resp.rect.expand(2.0), 4.0, Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Outside);
                             }
-                            let resp = resp.on_hover_text(format!(
-                                "{}\nKliknij, aby otworzyć w zaznaczonym oknie.\nShift + klik: otwórz w następnym oknie.",
-                                se.title()
-                            ));
+                            let resp = resp.on_hover_text(t!("app.sidebar.series_tip", title = se.title()));
                             if resp.clicked() {
                                 clicked = Some((se.id, ui.input(|i| i.modifiers.shift)));
                             }
@@ -1054,7 +1056,7 @@ impl App {
             }
             if lib.skipped_files > 0 {
                 ui.add_space(6.0);
-                ui.small(format!("Pominięto plików innych niż obrazy: {}", lib.skipped_files));
+                ui.small(t!("app.sidebar.skipped_files", count = lib.skipped_files));
             }
             ui.add_space(24.0);
         });
@@ -1101,15 +1103,27 @@ impl App {
         let ctx = ui.ctx().clone();
         let tw = |s: &str| -> f32 { ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x) + pad };
         let sep = ui.spacing().item_spacing.x * 2.0 + 1.0;
+        // napisy przycisków w bieżącym języku – mierzone są dokładnie te same, które potem rysujemy
+        let l_reset = t!("app.toolbar.reset");
+        let l_invert = t!("app.toolbar.invert");
+        let l_rotate = t!("app.toolbar.rotate");
+        let l_window = format!("{} ▾", t!("app.toolbar.window_menu"));
+        let l_image = format!("{} ▾", t!("app.toolbar.image_menu"));
+        let l_measure = format!("{} ▾", t!("app.toolbar.measurements_menu"));
+        let l_sync = t!("app.toolbar.sync");
+        let l_layout = t!("app.toolbar.layout");
+        let l_pro = t!("app.toolbar.pro_mode");
+        let l_pro_short = t!("app.toolbar.pro_mode_short");
+        let l_settings = t!("app.toolbar.settings");
         let longest_measure = measure.iter().map(|t| tw(t.label())).fold(0.0, f32::max);
         let w_tools_full: f32 = tools.iter().map(|t| tw(t.label())).sum();
-        let w_tools_mid: f32 = basic.iter().map(|t| tw(t.label())).sum::<f32>() + longest_measure + tw(" ▾");
+        let w_tools_mid: f32 = basic.iter().map(|t| tw(t.label())).sum::<f32>() + longest_measure.max(tw(t!("app.toolbar.measurements_menu"))) + tw(" ▾");
         let plane_w = self.plane_label(false).map(|l| tw(&l) + 16.0).unwrap_or(0.0);
         let plane_w_short = self.plane_label(true).map(|l| tw(&l) + 16.0).unwrap_or(0.0);
-        let w_view_full = if has { tw("Reset") + tw("Negatyw") + tw("Obróć") + tw("Jasność ▾") + plane_w } else { tw("Reset") + tw("Negatyw") + tw("Obróć") };
-        let w_view_min = tw("Obraz ▾") + if has { tw("Jasność ▾") + plane_w_short } else { 0.0 };
-        let w_layout = tw("1") + tw("2") + tw("4") + if n > 1 { tw("Razem") + 20.0 } else { 0.0 };
-        let w_right = tw("Układ:") + w_layout + tw("Tryb PRO") + tw("Ustawienia") + sep * 2.0;
+        let w_view_full = if has { tw(l_reset) + tw(l_invert) + tw(l_rotate) + tw(&l_window) + plane_w } else { tw(l_reset) + tw(l_invert) + tw(l_rotate) };
+        let w_view_min = tw(&l_image) + if has { tw(&l_window) + plane_w_short } else { 0.0 };
+        let w_layout = tw("1") + tw("2") + tw("4") + if n > 1 { tw(l_sync) + 20.0 } else { 0.0 };
+        let w_right = tw(l_layout) + w_layout + tw(l_pro) + tw(l_settings) + sep * 2.0;
         // poziom 4 (najwęższy): bez napisu „Układ:”, „PRO” zamiast „Tryb PRO”, ustawienia tylko w menu
         let w_tools_min = tools.iter().map(|t| tw(t.label())).fold(0.0, f32::max) + tw(" ▾");
         let avail = ui.available_width() - 8.0;
@@ -1138,7 +1152,7 @@ impl App {
                         ui.selectable_value(&mut self.tool, t, t.label()).on_hover_text(t.hint());
                     }
                     let active = measure.contains(&self.tool);
-                    let title = if active { format!("{} ▾", self.tool.label()) } else { "Pomiary ▾".to_string() };
+                    let title = if active { format!("{} ▾", self.tool.label()) } else { l_measure.clone() };
                     self.tool_menu(ui, &measure, title, active);
                 }
                 _ => {
@@ -1150,18 +1164,18 @@ impl App {
             // --- obraz ---
             ui.add_enabled_ui(has, |ui| {
                 if level < 2 {
-                    if ui.button("Reset").on_hover_text("Przywróć jasność, kontrast, powiększenie i obrót (R lub dwuklik)").clicked() {
+                    if ui.button(l_reset).on_hover_text(t!("app.toolbar.reset_tip")).clicked() {
                         self.pending.push(Action::ResetView);
                     }
                     let inv = self.viewports[self.active].invert;
-                    if ui.selectable_label(inv, "Negatyw").on_hover_text("Odwróć kolory (I)").clicked() {
+                    if ui.selectable_label(inv, l_invert).on_hover_text(t!("app.toolbar.invert_tip")).clicked() {
                         self.pending.push(Action::Invert);
                     }
-                    if ui.button("Obróć").on_hover_text("Obróć o 90° w prawo").clicked() {
+                    if ui.button(l_rotate).on_hover_text(t!("app.toolbar.rotate_tip")).clicked() {
                         self.pending.push(Action::RotateRight);
                     }
                 } else {
-                    ui.menu_button("Obraz ▾", |ui| {
+                    ui.menu_button(l_image.as_str(), |ui| {
                         for a in [Action::ResetView, Action::Invert, Action::RotateRight, Action::RotateLeft, Action::FlipH, Action::FlipV] {
                             if ui.button(a.label()).clicked() {
                                 self.pending.push(a);
@@ -1170,30 +1184,34 @@ impl App {
                         }
                     });
                 }
-                self.window_menu(ui);
+                self.window_menu(ui, &l_window);
                 self.plane_menu(ui, level >= 2);
             });
             // --- układ i ustawienia, dosunięte do prawej ---
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if level < 4 && ui.button("Ustawienia").clicked() {
+                if level < 4 && ui.button(l_settings).clicked() {
                     self.pending.push(Action::Settings);
                 }
-                let pro_label = if level < 4 { "Tryb PRO" } else { "PRO" };
-                if ui.selectable_label(pro, pro_label).on_hover_text("Tryb profesjonalny: więcej narzędzi i informacji").clicked() {
+                let pro_label = if level < 4 { l_pro } else { l_pro_short };
+                if ui.selectable_label(pro, pro_label).on_hover_text(t!("app.toolbar.pro_mode_tip")).clicked() {
                     self.pending.push(Action::TogglePro);
                 }
                 ui.separator();
-                if n > 1 && ui.checkbox(&mut self.settings.sync_scroll, "Razem").on_hover_text("Przewijaj okna razem (te same miejsca w ciele)").changed() {
+                if n > 1 && ui.checkbox(&mut self.settings.sync_scroll, l_sync).on_hover_text(t!("app.toolbar.sync_tip")).changed() {
                     self.settings_dirty = true;
                 }
                 let ctx = ui.ctx().clone();
-                for (k, label, tip) in [(4, "4", "Cztery okna"), (2, "2", "Dwa okna obok siebie"), (1, "1", "Jedno okno")] {
+                for (k, label, tip) in [
+                    (4, "4", t!("app.toolbar.layout_4_tip")),
+                    (2, "2", t!("app.toolbar.layout_2_tip")),
+                    (1, "1", t!("app.toolbar.layout_1_tip")),
+                ] {
                     if ui.selectable_label(n == k, label).on_hover_text(tip).clicked() {
                         self.set_layout(k, &ctx);
                     }
                 }
                 if level < 4 {
-                    ui.label("Układ:");
+                    ui.label(l_layout);
                 }
             });
         });
@@ -1205,10 +1223,11 @@ impl App {
         if mpr::available_planes(&series).is_empty() {
             return None;
         }
-        let prefix = if compact { "" } else { "Płaszczyzna: " };
-        Some(match self.viewports[self.active].plane {
-            ViewPlane::Native => format!("{prefix}{}", series.plane.pl()),
-            ViewPlane::Reformat(p) => format!("{prefix}{} (rekonstr.)", p.pl()),
+        Some(match (self.viewports[self.active].plane, compact) {
+            (ViewPlane::Native, true) => series.plane.pl().to_string(),
+            (ViewPlane::Native, false) => t!("app.toolbar.plane", plane = series.plane.pl()),
+            (ViewPlane::Reformat(p), true) => t!("app.toolbar.plane_reformat_short", plane = p.pl()),
+            (ViewPlane::Reformat(p), false) => t!("app.toolbar.plane_reformat", plane = p.pl()),
         })
     }
 
@@ -1223,45 +1242,50 @@ impl App {
                 }
             }
         });
-        resp.response.on_hover_text("Wybierz narzędzie");
+        resp.response.on_hover_text(t!("app.toolbar.choose_tool"));
     }
 
-    fn window_menu(&mut self, ui: &mut egui::Ui) {
+    /// `title` – napis przycisku menu (ten sam, który zmierzył pasek narzędzi).
+    fn window_menu(&mut self, ui: &mut egui::Ui, title: &str) {
         let vi = self.active;
         let Some(series) = self.active_series() else { return };
         let frame = self.current_frame(vi, &series).map(|(f, _, _)| f);
         let pro = self.settings.pro_mode;
-        ui.menu_button("Jasność ▾", |ui| {
-            if ui.button("Automatyczna").on_hover_text("Dobrana do rozkładu jasności obrazu").clicked() {
+        ui.menu_button(title, |ui| {
+            if ui.button(t!("app.window_menu.auto")).on_hover_text(t!("app.window_menu.auto_tip")).clicked() {
                 self.pending.push(Action::PresetAuto);
                 ui.close();
             }
             if let Some(f) = &frame {
                 for (c, w, expl) in &f.dicom_windows {
-                    let label = if expl.is_empty() { format!("Z aparatu (W {w:.0} / L {c:.0})") } else { format!("Z aparatu: {expl}") };
+                    let label = if expl.is_empty() {
+                        t!("app.window_menu.from_scanner", w = format!("{w:.0}"), c = format!("{c:.0}"))
+                    } else {
+                        t!("app.window_menu.from_scanner_named", name = expl)
+                    };
                     if ui.button(label).clicked() {
                         self.viewports[vi].window = Some((*c, *w));
                         ui.close();
                     }
                 }
                 let (ac, aw) = f.auto_window;
-                if ui.button("Większy kontrast").clicked() {
+                if ui.button(t!("app.window_menu.more_contrast")).clicked() {
                     self.viewports[vi].window = Some((ac, aw * 0.6));
                     ui.close();
                 }
-                if ui.button("Mniejszy kontrast").clicked() {
+                if ui.button(t!("app.window_menu.less_contrast")).clicked() {
                     self.viewports[vi].window = Some((ac, aw * 1.6));
                     ui.close();
                 }
-                if ui.button("Pełny zakres").clicked() {
+                if ui.button(t!("app.window_menu.full_range")).clicked() {
                     self.pending.push(Action::PresetFull);
                     ui.close();
                 }
                 if series.modality.eq_ignore_ascii_case("CT") {
                     ui.separator();
-                    for (name, c, w) in CT_PRESETS {
+                    for (name, c, w) in ct_presets() {
                         if ui.button(format!("{name} (W {w:.0} / L {c:.0})")).clicked() {
-                            self.viewports[vi].window = Some((*c, *w));
+                            self.viewports[vi].window = Some((c, w));
                             ui.close();
                         }
                     }
@@ -1272,18 +1296,18 @@ impl App {
                     let step = ((f.max - f.min) / 500.0).max(f.window_eps());
                     let mut changed = false;
                     ui.horizontal(|ui| {
-                        ui.label("Szerokość (W):");
+                        ui.label(t!("app.window_menu.width"));
                         changed |= ui.add(egui::DragValue::new(&mut w).speed(step).range(f.window_eps()..=f32::MAX)).changed();
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Poziom (L):");
+                        ui.label(t!("app.window_menu.level"));
                         changed |= ui.add(egui::DragValue::new(&mut c).speed(step)).changed();
                     });
                     if changed {
                         self.viewports[vi].window = Some((c, w));
                     }
                     ui.separator();
-                    ui.label("Mapa kolorów:");
+                    ui.label(t!("app.window_menu.colormap"));
                     for cm in Colormap::ALL {
                         let sel = self.viewports[vi].colormap == cm;
                         if ui.selectable_label(sel, cm.label()).clicked() {
@@ -1307,12 +1331,12 @@ impl App {
         egui::ComboBox::from_id_salt("plane")
             .selected_text(current)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(vp.plane == ViewPlane::Native, format!("oryginalna ({})", series.plane.pl())).clicked() {
+                if ui.selectable_label(vp.plane == ViewPlane::Native, t!("app.toolbar.plane_original", plane = series.plane.pl())).clicked() {
                     vp.plane = ViewPlane::Native;
                     vp.tex_key = None;
                 }
                 for p in planes {
-                    if ui.selectable_label(vp.plane == ViewPlane::Reformat(p), format!("{} – rekonstrukcja", p.pl())).clicked() {
+                    if ui.selectable_label(vp.plane == ViewPlane::Reformat(p), t!("app.toolbar.plane_reformat_item", plane = p.pl())).clicked() {
                         vp.plane = ViewPlane::Reformat(p);
                         vp.reformat_pos = usize::MAX;
                         vp.tex_key = None;
@@ -1321,19 +1345,19 @@ impl App {
                 }
             })
             .response
-            .on_hover_text("Rekonstrukcja w innej płaszczyźnie z wczytanych przekrojów. Przy grubych warstwach obraz jest rozmyty – to normalne. Najlepiej działa dla serii 3D.");
+            .on_hover_text(t!("app.toolbar.plane_tip"));
     }
 
     fn info_panel(&mut self, ui: &mut egui::Ui) {
         let vi = self.active;
         let Some(series) = self.active_series() else {
-            ui.label("Wybierz serię.");
+            ui.label(t!("app.info.select_series"));
             return;
         };
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.info_tab, InfoTab::Series, "Seria");
-            ui.selectable_value(&mut self.info_tab, InfoTab::Tags, "Tagi DICOM");
-            ui.selectable_value(&mut self.info_tab, InfoTab::Histogram, "Histogram");
+            ui.selectable_value(&mut self.info_tab, InfoTab::Series, t!("app.info.tab.series"));
+            ui.selectable_value(&mut self.info_tab, InfoTab::Tags, t!("app.info.tab.tags"));
+            ui.selectable_value(&mut self.info_tab, InfoTab::Histogram, t!("app.info.tab.histogram"));
         });
         ui.separator();
         match self.info_tab {
@@ -1342,25 +1366,25 @@ impl App {
                 let fmt = |v: Option<f64>, u: &str| v.map(|x| format!("{x:.2} {u}").replace(".00 ", " ")).unwrap_or_else(|| "—".into());
                 let st = self.study_of(series.id);
                 let rows: Vec<(&str, String)> = vec![
-                    ("Badanie", st.as_ref().map(|s| format!("{} {}", fmt_date(&s.date), s.description)).unwrap_or_default()),
-                    ("Seria", format!("{} {}", series.number.map(|n| n.to_string()).unwrap_or_default(), series.description)),
-                    ("Modalność", series.modality.clone()),
-                    ("Okolica", series.body_part.clone()),
-                    ("Protokół", q.protocol_name.clone()),
-                    ("Płaszczyzna", series.plane.pl().to_string()),
-                    ("Liczba obrazów", series.slices.len().to_string()),
-                    ("Matryca", format!("{} × {}", series.columns, series.rows)),
-                    ("Piksel", series.pixel_spacing.map(|(r, c)| format!("{c:.3} × {r:.3} mm")).unwrap_or("—".into())),
-                    ("Grubość warstwy", fmt(series.slice_thickness, "mm")),
-                    ("Odstęp warstw", fmt(series.slice_gap(), "mm")),
+                    (t!("app.info.row.study"), st.as_ref().map(|s| format!("{} {}", fmt_date(&s.date), s.description)).unwrap_or_default()),
+                    (t!("app.info.row.series"), format!("{} {}", series.number.map(|n| n.to_string()).unwrap_or_default(), series.description)),
+                    (t!("app.info.row.modality"), series.modality.clone()),
+                    (t!("app.info.row.body_part"), series.body_part.clone()),
+                    (t!("app.info.row.protocol"), q.protocol_name.clone()),
+                    (t!("app.info.row.plane"), series.plane.pl().to_string()),
+                    (t!("app.info.row.image_count"), series.slices.len().to_string()),
+                    (t!("app.info.row.matrix"), format!("{} × {}", series.columns, series.rows)),
+                    (t!("app.info.row.pixel"), series.pixel_spacing.map(|(r, c)| format!("{c:.3} × {r:.3} mm")).unwrap_or("—".into())),
+                    (t!("app.info.row.slice_thickness"), fmt(series.slice_thickness, "mm")),
+                    (t!("app.info.row.slice_spacing"), fmt(series.slice_gap(), "mm")),
                     ("TR", fmt(q.repetition_time, "ms")),
                     ("TE", fmt(q.echo_time, "ms")),
                     ("TI", fmt(q.inversion_time, "ms")),
-                    ("Kąt odchylenia", fmt(q.flip_angle, "°")),
-                    ("Pole", fmt(q.magnetic_field_strength, "T")),
-                    ("Sekwencja", format!("{} {}", q.scanning_sequence, q.sequence_name)),
-                    ("Kontrast", if q.contrast_agent.is_empty() { "—".into() } else { q.contrast_agent.clone() }),
-                    ("Typ obrazu", q.image_type.clone()),
+                    (t!("app.info.row.flip_angle"), fmt(q.flip_angle, "°")),
+                    (t!("app.info.row.field_strength"), fmt(q.magnetic_field_strength, "T")),
+                    (t!("app.info.row.sequence"), format!("{} {}", q.scanning_sequence, q.sequence_name)),
+                    (t!("app.info.row.contrast_agent"), if q.contrast_agent.is_empty() { "—".into() } else { q.contrast_agent.clone() }),
+                    (t!("app.info.row.image_type"), q.image_type.clone()),
                 ];
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     egui::Grid::new("series_info").num_columns(2).striped(true).show(ui, |ui| {
@@ -1371,7 +1395,7 @@ impl App {
                         }
                     });
                     ui.add_space(6.0);
-                    ui.small("TR/TE – czasy sekwencji; krótkie TR i TE to zwykle obrazy T1-zależne, długie – T2-zależne. STIR/FLAIR tłumią sygnał tłuszczu lub płynu.");
+                    ui.small(t!("app.info.sequence_note"));
                 });
             }
             InfoTab::Tags => {
@@ -1391,10 +1415,14 @@ impl App {
                         .collect()
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Szukaj:");
+                    ui.label(t!("app.info.tags_search"));
                     ui.text_edit_singleline(&mut self.tags_filter);
                 });
-                ui.small(format!("Obraz {} · {}", idx + 1, path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()));
+                ui.small(t!(
+                    "app.info.tags_image",
+                    n = idx + 1,
+                    file = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()
+                ));
                 let filt = self.tags_filter.to_lowercase();
                 egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                     egui::Grid::new("tags").num_columns(3).striped(true).show(ui, |ui| {
@@ -1406,7 +1434,7 @@ impl App {
                             let hidden = hide && t.is_some_and(imaging::is_identifying);
                             ui.monospace(egui::RichText::new(tag).weak());
                             ui.label(name);
-                            ui.label(if hidden { "[ukryte]" } else { val });
+                            ui.label(if hidden { t!("app.info.tags_hidden") } else { val });
                             ui.end_row();
                         }
                     });
@@ -1415,7 +1443,7 @@ impl App {
             InfoTab::Histogram => {
                 let Some((f, _, _)) = self.current_frame(vi, &series) else { return };
                 let Pixels::Gray(v) = &f.pixels else {
-                    ui.label("Obraz kolorowy – histogram niedostępny.");
+                    ui.label(t!("app.info.histogram_color"));
                     return;
                 };
                 const BINS: usize = 128;
@@ -1443,7 +1471,13 @@ impl App {
                 let col = Color32::from_rgb(80, 170, 255);
                 p.line_segment([Pos2::new(x(c - w / 2.0), rect.max.y), Pos2::new(x(c + w / 2.0), rect.min.y)], Stroke::new(1.5, col));
                 p.rect_filled(Rect::from_min_max(Pos2::new(x(c - w / 2.0), rect.min.y), Pos2::new(x(c + w / 2.0), rect.max.y)), 0.0, col.gamma_multiply(0.15));
-                ui.small(format!("Zakres wartości {:.0} … {:.0}. Niebieski obszar to bieżące okno (W {w:.0}, L {c:.0}).", f.min, f.max));
+                ui.small(t!(
+                    "app.info.histogram_note",
+                    min = format!("{:.0}", f.min),
+                    max = format!("{:.0}", f.max),
+                    w = format!("{w:.0}"),
+                    c = format!("{c:.0}")
+                ));
             }
         }
     }
@@ -1451,18 +1485,18 @@ impl App {
     fn welcome(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space((ui.available_height() * 0.18).max(20.0));
-            ui.heading(egui::RichText::new("Przeglądarka MRI").size(28.0));
+            ui.heading(egui::RichText::new(t!("app.title")).size(28.0));
             ui.add_space(6.0);
-            ui.label("Prosty podgląd badań rezonansu, tomografii i innych obrazów DICOM.");
+            ui.label(t!("app.start.subtitle"));
             ui.add_space(18.0);
-            if ui.add_sized([300.0, 44.0], egui::Button::new(egui::RichText::new("Otwórz folder z badaniem…").size(17.0))).clicked() {
+            if ui.add_sized([300.0, 44.0], egui::Button::new(egui::RichText::new(t!("app.start.open_folder")).size(17.0))).clicked() {
                 self.pending.push(Action::OpenFolder);
             }
             ui.add_space(6.0);
-            ui.small("Wskaż folder skopiowany z płyty albo przeciągnij go na to okno.");
+            ui.small(t!("app.start.open_folder_hint"));
             if !self.settings.recent.is_empty() {
                 ui.add_space(20.0);
-                ui.label(egui::RichText::new("Ostatnio otwierane").strong());
+                ui.label(egui::RichText::new(t!("app.start.recent")).strong());
                 let ctx = ui.ctx().clone();
                 for r in self.settings.recent.clone() {
                     let exists = std::path::Path::new(&r).is_dir();
@@ -1472,16 +1506,24 @@ impl App {
                 }
             }
             ui.add_space(24.0);
-            ui.small(egui::RichText::new("Narzędzie poglądowe – nie służy do diagnozy. Wiążący jest opis radiologa.").color(Color32::from_rgb(230, 170, 80)));
+            ui.small(egui::RichText::new(t!("app.start.disclaimer")).color(Color32::from_rgb(230, 170, 80)));
         });
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
+        // okna mają stałe id, bo tytuł zmienia się razem z językiem
         if self.show_settings {
             let mut open = true;
-            egui::Window::new("Ustawienia").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+            egui::Window::new(t!("app.dialog.settings_title")).id(egui::Id::unique("settings_window")).pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
                 if self.settings.ui(ui) {
+                    let lang_before = crate::i18n::current();
                     self.settings.apply(ctx);
+                    if crate::i18n::current() != lang_before {
+                        // nowy język: tytuł okna i (na macOS) menu systemowe trzeba zbudować ponownie
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Title(t!("app.title").to_string()));
+                        #[cfg(target_os = "macos")]
+                        actions::native::rebuild_menu();
+                    }
                     self.settings_dirty = true;
                     if !self.settings.pro_mode && self.tool.pro() {
                         self.tool = Tool::Window;
@@ -1495,14 +1537,14 @@ impl App {
         }
         if self.show_help {
             let mut open = true;
-            egui::Window::new("Pomoc").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).default_width(560.0).show(ctx, |ui| {
+            egui::Window::new(t!("app.dialog.help_title")).id(egui::Id::unique("help_window")).pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).default_width(560.0).show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| help_ui(ui));
             });
             self.show_help = open;
         }
         if self.show_about {
             let mut open = true;
-            egui::Window::new("O programie").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            egui::Window::new(t!("app.dialog.about_title")).id(egui::Id::unique("about_window")).pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
                 about::ui(ui);
             });
             self.show_about = open;
@@ -1511,42 +1553,45 @@ impl App {
             let mut open = true;
             let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("mri-viewer"));
             let args = export::mcp_args(self.folder.as_deref(), self.connect_show_patient);
-            egui::Window::new("Podłącz do Claude (MCP)").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).default_width(620.0).show(ctx, |ui| {
-                ui.label("Dzięki temu Claude (w aplikacji Claude Desktop albo w Claude Code) może sam przeglądać serie z otwartego folderu, oglądać przekroje i mierzyć.");
+            egui::Window::new(t!("app.connect.title")).id(egui::Id::unique("connect_window")).pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).default_width(620.0).show(ctx, |ui| {
+                ui.label(t!("app.connect.intro"));
                 if self.folder.is_none() {
-                    ui.colored_label(Color32::LIGHT_RED, "Najpierw otwórz folder z badaniem – jego ścieżka trafi do konfiguracji.");
+                    ui.colored_label(Color32::LIGHT_RED, t!("app.connect.no_folder"));
                 }
                 if exe.to_string_lossy().contains("AppTranslocation") {
-                    ui.colored_label(Color32::LIGHT_RED, "Program działa z tymczasowej lokalizacji. Przenieś „MRI Viewer” do folderu Programy i uruchom go ponownie.");
+                    ui.colored_label(Color32::LIGHT_RED, t!("app.connect.translocated"));
                 }
-                ui.checkbox(&mut self.connect_show_patient, "Przekazuj Claude dane osobowe pacjenta (imię, nazwisko, PESEL, placówkę)")
-                    .on_hover_text("Domyślnie wyłączone: Claude widzi tylko płeć i wiek.");
+                ui.checkbox(&mut self.connect_show_patient, t!("app.connect.share_patient"))
+                    .on_hover_text(t!("app.connect.share_patient_tip"));
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new("Claude Desktop").strong());
-                if ui.button("Dodaj automatycznie do Claude Desktop").clicked() {
-                    self.connect_msg = match export::install_into_claude_desktop(&exe, &args) {
-                        Ok(p) => format!("Gotowe. Zapisano {} (kopia poprzedniej wersji: .json.bak). Zamknij i uruchom ponownie Claude Desktop.", p.display()),
-                        Err(e) => format!("Nie udało się: {e:#}"),
-                    };
+                if ui.button(t!("app.connect.add_to_desktop")).clicked() {
+                    self.connect_msg = Some(export::install_into_claude_desktop(&exe, &args).map_err(|e| format!("{e:#}")));
                 }
-                if !self.connect_msg.is_empty() {
-                    ui.label(&self.connect_msg);
+                match &self.connect_msg {
+                    Some(Ok(p)) => {
+                        ui.label(t!("app.connect.added", path = p.display()));
+                    }
+                    Some(Err(e)) => {
+                        ui.label(t!("app.connect.add_failed", error = e));
+                    }
+                    None => {}
                 }
-                ui.small("Albo wklej ręcznie w Claude Desktop → Ustawienia → Developer → Edit Config:");
+                ui.small(t!("app.connect.manual"));
                 let snippet = export::desktop_snippet(&exe, &args);
                 ui.add(egui::TextEdit::multiline(&mut snippet.as_str()).code_editor().desired_rows(8).desired_width(f32::INFINITY));
-                if ui.button("Kopiuj").clicked() {
+                if ui.button(t!("app.connect.copy")).clicked() {
                     ui.ctx().copy_text(snippet.clone());
                 }
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(if cfg!(windows) { "Claude Code (terminal PowerShell)" } else { "Claude Code (terminal)" }).strong());
+                ui.label(egui::RichText::new(if cfg!(windows) { t!("app.connect.claude_code_powershell") } else { t!("app.connect.claude_code_terminal") }).strong());
                 let cmd = export::claude_code_command(&exe, &args);
                 ui.add(egui::TextEdit::multiline(&mut cmd.as_str()).code_editor().desired_rows(2).desired_width(f32::INFINITY));
-                if ui.button("Kopiuj polecenie").clicked() {
+                if ui.button(t!("app.connect.copy_command")).clicked() {
                     ui.ctx().copy_text(cmd.clone());
                 }
                 ui.add_space(6.0);
-                ui.small("Obrazy oglądane przez Claude są wysyłane do Anthropic jak każda treść rozmowy. Claude może się mylić – to nie zastępuje opisu radiologa.");
+                ui.small(t!("app.connect.privacy_note"));
             });
             self.show_connect = open;
         }
@@ -1630,24 +1675,24 @@ fn nearest_slice(s: &Series, p: [f64; 3], n: [f64; 3]) -> Option<usize> {
 }
 
 fn help_ui(ui: &mut egui::Ui) {
-    ui.heading("Jak oglądać");
-    ui.label("1. Otwórz folder z badaniem (Plik → Otwórz folder albo przeciągnij folder na okno).");
-    ui.label("2. Po lewej wybierz serię. Seria to zestaw zdjęć zrobionych w jednym ustawieniu aparatu (np. T1, T2, STIR) i jednej płaszczyźnie.");
-    ui.label("3. Przewijaj przekroje kółkiem myszy, strzałkami albo suwakiem na dole obrazu.");
+    ui.heading(t!("app.help.how_to_view"));
+    ui.label(t!("app.help.step_open"));
+    ui.label(t!("app.help.step_series"));
+    ui.label(t!("app.help.step_scroll"));
     ui.add_space(6.0);
-    ui.heading("Płaszczyzny");
-    ui.label("Poprzeczna – plastry oglądane od strony stóp (prawa strona pacjenta jest po lewej stronie ekranu). Strzałkowa – widok z boku. Czołowa – widok od przodu. Litery na krawędziach: R/L – prawa/lewa, A/P – przód/tył, S/I – góra/dół ciała.");
+    ui.heading(t!("app.help.planes"));
+    ui.label(t!("app.help.planes_text"));
     ui.add_space(6.0);
-    ui.heading("Mysz");
+    ui.heading(t!("app.help.mouse"));
     egui::Grid::new("mouse").num_columns(2).striped(true).show(ui, |ui| {
         for (k, v) in [
-            ("Kółko", "kolejne przekroje"),
-            ("Cmd/Ctrl + kółko, gest szczypania", "powiększenie"),
-            ("Lewy przycisk", "działanie wybranego narzędzia"),
-            ("Prawy lub środkowy przycisk – przeciąganie", "przesuwanie obrazu"),
-            ("Prawy przycisk – kliknięcie", "menu (np. usuń pomiar)"),
-            ("Dwuklik", "reset widoku (na strzałce: edycja opisu)"),
-            ("Przeciąganie pomiaru lub jego końca", "przesuwanie / zmiana"),
+            (t!("app.help.mouse.wheel"), t!("app.help.mouse.wheel_action")),
+            (t!("app.help.mouse.zoom"), t!("app.help.mouse.zoom_action")),
+            (t!("app.help.mouse.left"), t!("app.help.mouse.left_action")),
+            (t!("app.help.mouse.drag_pan"), t!("app.help.mouse.drag_pan_action")),
+            (t!("app.help.mouse.right_click"), t!("app.help.mouse.right_click_action")),
+            (t!("app.help.mouse.double_click"), t!("app.help.mouse.double_click_action")),
+            (t!("app.help.mouse.drag_measurement"), t!("app.help.mouse.drag_measurement_action")),
         ] {
             ui.label(egui::RichText::new(k).strong());
             ui.label(v);
@@ -1655,7 +1700,7 @@ fn help_ui(ui: &mut egui::Ui) {
         }
     });
     ui.add_space(6.0);
-    ui.heading("Klawiatura");
+    ui.heading(t!("app.help.keyboard"));
     egui::Grid::new("keys").num_columns(2).striped(true).show(ui, |ui| {
         for a in actions::ALL {
             let key = a
@@ -1668,20 +1713,25 @@ fn help_ui(ui: &mut egui::Ui) {
                 ui.end_row();
             }
         }
-        for (k, v) in [("↑ ↓ ← →", "poprzedni / następny przekrój"), ("PageUp / PageDown", "10 przekrojów"), ("Delete", "usuń zaznaczony pomiar"), ("Esc", "przerwij rysowanie / odznacz")] {
+        for (k, v) in [
+            ("↑ ↓ ← →", t!("app.help.key.arrows")),
+            ("PageUp / PageDown", t!("app.help.key.page")),
+            ("Delete", t!("app.help.key.delete")),
+            ("Esc", t!("app.help.key.escape")),
+        ] {
             ui.monospace(k);
             ui.label(v);
             ui.end_row();
         }
     });
     ui.add_space(6.0);
-    ui.heading("Pomiary");
-    ui.label("Wybierz narzędzie (np. Odległość) i przeciągnij po obrazie. Kliknij pomiar, aby go zaznaczyć: można go przesunąć, przeciągnąć jego końce albo usunąć klawiszem Delete lub prawym przyciskiem. Cmd/Ctrl+Z cofa zmianę. Pomiary są zapamiętywane osobno dla każdego przekroju.");
+    ui.heading(t!("app.help.measurements"));
+    ui.label(t!("app.help.measurements_text", tool = Tool::Line.label()));
     ui.add_space(6.0);
-    ui.heading("Tryb profesjonalny");
-    ui.label("Dodaje pomiar kąta, obszary ROI ze średnią jasnością i polem, sondę, wskaźnik 3D, mapy kolorów, dokładne wartości okna, panel tagów DICOM i histogram oraz współrzędne w mm.");
+    ui.heading(t!("app.help.pro_mode"));
+    ui.label(t!("app.help.pro_mode_text"));
     ui.add_space(6.0);
-    ui.colored_label(Color32::from_rgb(230, 170, 80), "To narzędzie poglądowe. Nie służy do stawiania diagnozy – wiążący jest opis radiologa.");
+    ui.colored_label(Color32::from_rgb(230, 170, 80), t!("app.help.disclaimer"));
 }
 
 impl eframe::App for App {
@@ -1710,7 +1760,7 @@ impl eframe::App for App {
                     .max_by_key(|(_, s)| s.slices.len().min(60))
                     .or_else(|| lib.all_series().next())
                     .map(|(_, s)| s.id);
-                self.status = format!("Znaleziono badań: {}, serii: {}", lib.studies.len(), lib.series_count());
+                self.status = t!("app.status.scan_done", studies = lib.studies.len(), series = lib.series_count());
                 self.lib = Some(Arc::new(lib));
                 if let Some(id) = first {
                     self.assign_series(0, id, &ctx);
@@ -1768,7 +1818,7 @@ impl eframe::App for App {
         });
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.small(egui::RichText::new("Narzędzie poglądowe – nie do diagnozy").color(Color32::from_rgb(230, 170, 80)));
+                ui.small(egui::RichText::new(t!("app.status.disclaimer")).color(Color32::from_rgb(230, 170, 80)));
                 ui.separator();
                 if let Some(j) = &job_line {
                     ui.spinner();
@@ -1781,7 +1831,7 @@ impl eframe::App for App {
                     let n = self.store.count();
                     if n > 0 {
                         ui.separator();
-                        ui.small(format!("Pomiary: {n}"));
+                        ui.small(t!("app.status.measurement_count", count = n));
                     }
                 });
             });
@@ -1841,7 +1891,7 @@ impl eframe::App for App {
                 let Some(series) = series else {
                     let p = child.painter_at(r);
                     p.rect_filled(r, 0.0, Color32::BLACK);
-                    p.text(r.center(), egui::Align2::CENTER_CENTER, "Kliknij tu, a potem wybierz serię z listy", egui::FontId::proportional(15.0), Color32::GRAY);
+                    p.text(r.center(), egui::Align2::CENTER_CENTER, t!("app.view.empty"), egui::FontId::proportional(15.0), Color32::GRAY);
                     if n > 1 {
                         let col = viewport::VIEW_COLORS[vi % 4];
                         p.rect_stroke(r.shrink(1.0), 0.0, Stroke::new(if vi == self.active { 3.0 } else { 1.0 }, col), egui::StrokeKind::Inside);
@@ -1862,8 +1912,8 @@ impl eframe::App for App {
                     let p = child.painter_at(r);
                     p.rect_filled(r, 0.0, Color32::BLACK);
                     let msg = match self.errors.lock().unwrap().get(&series.id) {
-                        Some(e) => format!("Nie udało się odczytać obrazu:\n{e}"),
-                        None => format!("Wczytywanie… {}/{}", self.loaded_count(&series), series.slices.len()),
+                        Some(e) => t!("app.view.read_error", error = e),
+                        None => t!("app.view.loading", done = self.loaded_count(&series), total = series.slices.len()),
                     };
                     p.text(r.center(), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(15.0), Color32::GRAY);
                     ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -1962,7 +2012,8 @@ impl eframe::App for App {
 pub fn run(folder: Option<PathBuf>) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Przeglądarka MRI")
+            // język z ustawień nie jest jeszcze znany – App::new ustawia tytuł ponownie
+            .with_title(t!("app.title"))
             .with_app_id("mri-viewer")
             .with_inner_size([1360.0, 860.0])
             .with_min_inner_size([720.0, 480.0])
@@ -1972,6 +2023,7 @@ pub fn run(folder: Option<PathBuf>) -> anyhow::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
+        // nazwa programu dla eframe wyznacza folder z zapisanymi ustawieniami – nie tłumaczymy jej
         "Przeglądarka MRI",
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, folder)))),
