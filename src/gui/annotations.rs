@@ -53,12 +53,12 @@ impl Shape {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Shape::Line(_) => "Odległość",
-            Shape::Angle(_) => "Kąt",
-            Shape::Ellipse(_) => "Obszar owalny",
-            Shape::Rect(_) => "Obszar prostokątny",
-            Shape::Arrow(_, _) => "Strzałka",
-            Shape::Probe(_) => "Sonda",
+            Shape::Line(_) => t!("ann.shape.distance"),
+            Shape::Angle(_) => t!("ann.shape.angle"),
+            Shape::Ellipse(_) => t!("ann.shape.oval_region"),
+            Shape::Rect(_) => t!("ann.shape.rect_region"),
+            Shape::Arrow(_, _) => t!("ann.shape.arrow"),
+            Shape::Probe(_) => t!("ann.shape.probe"),
         }
     }
 }
@@ -162,9 +162,14 @@ pub fn result_text(shape: &Shape, frame: &Frame, sp: Option<Spacing>, units: &st
                 let area = sp
                     .map(|(r, c)| format!("{:.1} mm²", s.n as f64 * r * c))
                     .unwrap_or_else(|| format!("{} px", s.n));
-                format!(
-                    "Śr. {:.1}{u} ± {:.1}\nmin {:.0}  maks. {:.0}\npole {area}",
-                    s.mean, s.sd, s.min, s.max
+                t!(
+                    "ann.roi.stats",
+                    mean = format!("{:.1}", s.mean),
+                    units = u,
+                    sd = format!("{:.1}", s.sd),
+                    min = format!("{:.0}", s.min),
+                    max = format!("{:.0}", s.max),
+                    area = area
                 )
             }
             None => "—".into(),
