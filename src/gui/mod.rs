@@ -1957,6 +1957,8 @@ mod tests {
             spacing_between_slices: None,
             orientation: Some([1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
             frame_of_reference: String::new(),
+            variant: String::new(),
+            may_have_burned_in_text: false,
             sequence: SequenceInfo::default(),
             series_date: String::new(),
             series_time: String::new(),
