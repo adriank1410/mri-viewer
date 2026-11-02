@@ -24,7 +24,9 @@ stored on the user's computer. Workflow: call list_series first, then view_monta
 then view_slice for detail. Slice numbers are 1-based. Images are rendered as PNG with a window (brightness/contrast) \
 that you can change via window_center/window_width. IMPORTANT: this is a non-diagnostic viewing aid. When describing \
 findings, be careful and explicit about uncertainty, and remind the user that only a radiologist's report is \
-authoritative. Patient-identifying fields are hidden unless the server was started with --show-patient.";
+authoritative. Patient-identifying fields are hidden unless the server was started with --show-patient; \
+in that mode series that may have patient data burned into the pixels (screen captures, scanned documents, \
+annotated images) cannot be viewed, and file paths are not shown.";
 
 #[derive(Clone)]
 pub struct MriServer {
@@ -149,8 +151,46 @@ fn pick_window(frame: &Frame, w: &WindowArgs) -> (f32, f32, bool) {
     let (c0, w0) = frame.default_window();
     (
         w.window_center.unwrap_or(c0),
-        w.window_width.unwrap_or(w0).max(1.0),
+        // minimum zależne od zakresu wartości (mapy parametryczne bywają rzędu 0,001)
+        w.window_width.unwrap_or(w0).max(frame.window_eps()),
         w.invert.unwrap_or(false),
+    )
+}
+
+/// Liczba z 3–4 cyframi znaczącymi, także dla bardzo małych wartości.
+fn fmt_val(v: f32) -> String {
+    let a = v.abs();
+    if !a.is_finite() || a == 0.0 {
+        return format!("{v:.0}");
+    }
+    let dec = (3 - a.log10().floor() as i32).clamp(0, 12) as usize;
+    let s = format!("{v:.dec$}");
+    if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s }
+}
+
+/// Nazwa strony ciała, w którą wskazuje kierunek w układzie LPS.
+fn side_name(v: [f64; 3]) -> &'static str {
+    let a = [v[0].abs(), v[1].abs(), v[2].abs()];
+    if a[0] >= a[1] && a[0] >= a[2] {
+        if v[0] > 0.0 { "patient left" } else { "patient right" }
+    } else if a[1] >= a[2] {
+        if v[1] > 0.0 { "posterior" } else { "anterior" }
+    } else if v[2] > 0.0 {
+        "head (superior)"
+    } else {
+        "feet (inferior)"
+    }
+}
+
+/// Opis orientacji obrazu z kierunków osi (x w prawo, y w dół).
+fn orientation_text(xdir: [f64; 3], ydir: [f64; 3]) -> String {
+    let neg = |v: [f64; 3]| [-v[0], -v[1], -v[2]];
+    format!(
+        "Top of image = {}, bottom = {}, image left = {}, image right = {}.",
+        side_name(neg(ydir)),
+        side_name(ydir),
+        side_name(neg(xdir)),
+        side_name(xdir)
     )
 }
 
@@ -176,6 +216,32 @@ impl MriServer {
         lib.series_by_id(id)
             .map(|(st, se)| (st.clone(), se.clone()))
             .ok_or_else(|| err(format!("No series with id {id}. Call list_series.")))
+    }
+
+    /// W trybie anonimowym odmawia wysłania pikseli serii, które mogą mieć wpisane dane pacjenta.
+    fn check_viewable(&self, se: &Series) -> Result<(), McpError> {
+        if self.anonymize && se.may_have_burned_in_text {
+            return Err(err(format!(
+                "Series {} may have patient data burned into the pixels (screen capture, scanned document or \
+annotated image), so its images are not shared while patient data is hidden. The user can view it in the \
+MRI viewer window, or restart the server with --show-patient.",
+                se.id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Błąd odczytu pliku; w trybie anonimowym bez ścieżek (nazwy folderów mogą zawierać nazwisko).
+    fn load_err(&self, e: anyhow::Error) -> McpError {
+        if !self.anonymize {
+            return err(e);
+        }
+        let cause = e.root_cause().to_string();
+        if cause.contains('/') || cause.contains('\\') {
+            err("Cannot read the image file (unreadable, truncated or unsupported format).")
+        } else {
+            err(format!("Cannot read the image file: {cause}"))
+        }
     }
 
     fn slice_index(series: &Series, slice: Option<usize>) -> Result<usize, McpError> {
@@ -237,6 +303,13 @@ impl MriServer {
         if !seq.is_empty() {
             let _ = write!(s, " | {}", seq.join(", "));
         }
+        if se.may_have_burned_in_text {
+            s.push_str(if self.anonymize {
+                " | [hidden: may contain burned-in patient data; images not available]"
+            } else {
+                " | note: may contain burned-in text (screen capture or annotated image)"
+            });
+        }
         s
     }
 
@@ -269,7 +342,10 @@ impl MriServer {
         let (tw, th) = imaging::target_size(gw, gh, spacing, size.clamp(64, 2048));
         let scaled = imaging::resize_gray(&gray, gw, gh, tw, th);
         let png = imaging::encode_png_gray(&scaled, tw, th).map_err(err)?;
-        Ok((png, format!("Window center {c:.0}, width {ww:.0}{}.{note}", if inv { ", inverted" } else { "" })))
+        Ok((
+            png,
+            format!("Window center {}, width {}{}.{note}", fmt_val(c), fmt_val(ww), if inv { ", inverted" } else { "" }),
+        ))
     }
 }
 
@@ -302,10 +378,19 @@ impl MriServer {
         if lib.studies.is_empty() {
             return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "No images found{}. Use open_folder with a path to the DICOM folder.",
-                if lib.root.as_os_str().is_empty() { String::new() } else { format!(" in {}", lib.root.display()) }
+                if lib.root.as_os_str().is_empty() || self.anonymize {
+                    String::new()
+                } else {
+                    format!(" in {}", lib.root.display())
+                }
             ))]));
         }
-        let mut out = format!("Folder: {}\n", lib.root.display());
+        // ścieżka folderu często zawiera nazwisko pacjenta albo nazwę konta
+        let mut out = if self.anonymize {
+            "Folder: [hidden]\n".to_string()
+        } else {
+            format!("Folder: {}\n", lib.root.display())
+        };
         for st in &lib.studies {
             let _ = writeln!(
                 out,
@@ -327,13 +412,14 @@ impl MriServer {
     #[tool(description = "Render one slice of a series as a PNG image. Optionally set window center/width, invert, or crop to a region (in original pixel coordinates) to zoom in.")]
     async fn view_slice(&self, Parameters(a): Parameters<ViewSliceArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
+        self.check_viewable(&se)?;
         let idx = Self::slice_index(&se, a.slice)?;
         let sl = se.slices[idx].clone();
         let cache = self.cache.clone();
         let frame = tokio::task::spawn_blocking(move || cache.get(&sl))
             .await
             .map_err(err)?
-            .map_err(err)?;
+            .map_err(|e| self.load_err(e))?;
         let (png, wnote) =
             Self::render_frame_png(&frame, se.pixel_spacing, &a.window, a.size.unwrap_or(768), a.region)?;
         let s = &se.slices[idx];
@@ -355,8 +441,9 @@ impl MriServer {
         }
         let _ = write!(
             info,
-            " Pixel value range {:.0}..{:.0}. {wnote} Image is shown in radiological convention as stored (patient's right on image left for axial/coronal).",
-            frame.min, frame.max
+            " Pixel value range {}..{}. {wnote} Image is shown in radiological convention as stored (patient's right on image left for axial/coronal).",
+            fmt_val(frame.min),
+            fmt_val(frame.max)
         );
         Ok(CallToolResult::success(vec![ContentBlock::text(info), png_block(png)]))
     }
@@ -364,6 +451,7 @@ impl MriServer {
     #[tool(description = "Render a grid (montage) of evenly spaced slices from a series in one PNG, each tile labelled with its 1-based slice number in the top-left corner. Best way to get an overview.")]
     async fn view_montage(&self, Parameters(a): Parameters<MontageArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
+        self.check_viewable(&se)?;
         let n = se.slices.len();
         let first = a.first.unwrap_or(1).clamp(1, n) - 1;
         let last = a.last.unwrap_or(n).clamp(1, n) - 1;
@@ -391,7 +479,7 @@ impl MriServer {
         })
         .await
         .map_err(err)?
-        .map_err(err)?;
+        .map_err(|e| self.load_err(e))?;
         // wspólne okno dla wszystkich kafelków (ze środkowego przekroju), chyba że podano
         let mid = &frames[frames.len() / 2];
         let (c, ww, inv) = pick_window(mid, &a.window);
@@ -399,7 +487,7 @@ impl MriServer {
         let (canvas, canvas_w, canvas_h) = imaging::render_montage(&pairs, (c, ww), inv, se.pixel_spacing, tile, cols);
         let png = imaging::encode_png_gray(&canvas, canvas_w, canvas_h).map_err(err)?;
         let info = format!(
-            "Series {} \"{}\" ({}), {} of {} slices: {}. Grid {}x{}, read left-to-right, top-to-bottom. Window center {:.0}, width {:.0}.",
+            "Series {} \"{}\" ({}), {} of {} slices: {}. Grid {}x{}, read left-to-right, top-to-bottom. Window center {}, width {}.",
             se.id,
             se.description,
             se.plane.en(),
@@ -408,8 +496,8 @@ impl MriServer {
             idxs.iter().map(|i| (i + 1).to_string()).collect::<Vec<_>>().join(", "),
             cols,
             rows,
-            c,
-            ww
+            fmt_val(c),
+            fmt_val(ww)
         );
         Ok(CallToolResult::success(vec![ContentBlock::text(info), png_block(png)]))
     }
@@ -458,7 +546,7 @@ impl MriServer {
     async fn dicom_tags(&self, Parameters(a): Parameters<TagsArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
         let idx = Self::slice_index(&se, Some(a.slice.unwrap_or(1)))?;
-        let txt = imaging::dump_tags(&se.slices[idx].path, self.anonymize).map_err(err)?;
+        let txt = imaging::dump_tags(&se.slices[idx].path, self.anonymize).map_err(|e| self.load_err(e))?;
         Ok(CallToolResult::success(vec![ContentBlock::text(txt)]))
     }
 
@@ -471,7 +559,7 @@ impl MriServer {
         let frame = tokio::task::spawn_blocking(move || cache.get(&sl))
             .await
             .map_err(err)?
-            .map_err(err)?;
+            .map_err(|e| self.load_err(e))?;
         let Some((mean, sd, mn, mx, n)) = imaging::region_stats(&frame, a.x, a.y, a.width, a.height) else {
             return Err(err("Region outside image or colour image"));
         };
@@ -505,6 +593,7 @@ impl MriServer {
     #[tool(description = "Reconstruct an image in another plane (multiplanar reformat) from a stack of parallel slices, e.g. a coronal view from an axial series. Quality depends on slice spacing: thick slices give blurry/stair-step reformats.")]
     async fn view_reformat(&self, Parameters(a): Parameters<ReformatArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
+        self.check_viewable(&se)?;
         let plane = match a.plane.to_lowercase().as_str() {
             "axial" | "transverse" => Plane::Axial,
             "coronal" => Plane::Coronal,
@@ -518,16 +607,17 @@ impl MriServer {
         })
         .await
         .map_err(err)?
-        .map_err(err)?;
+        .map_err(|e| self.load_err(e))?;
         let rf = mpr::reformat(&se, &frames, plane, a.position.map(|p| p.saturating_sub(1))).map_err(err)?;
         let (png, wnote) = Self::render_frame_png(&rf.frame, Some(rf.spacing), &a.window, a.size.unwrap_or(768), None)?;
         let pos = a.position.unwrap_or(rf.positions / 2 + 1).clamp(1, rf.positions);
         let info = format!(
-            "Reformat of series {} into {} plane, position {}/{}. Top of image = head (superior). Pixel spacing {:.2} mm (vertical) x {:.2} mm (horizontal). {}",
+            "Reformat of series {} into {} plane, position {}/{}. {} Pixel spacing {:.2} mm (vertical) x {:.2} mm (horizontal). {}",
             se.id,
             rf.plane.en(),
             pos,
             rf.positions,
+            orientation_text(rf.xdir, rf.ydir),
             rf.spacing.0,
             rf.spacing.1,
             wnote
@@ -553,4 +643,44 @@ pub fn run(folder: Option<PathBuf>, anonymize: bool) -> anyhow::Result<()> {
         service.waiting().await?;
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_values_are_formatted_readably() {
+        assert_eq!(fmt_val(1500.0), "1500");
+        assert_eq!(fmt_val(12.5), "12.5");
+        assert_eq!(fmt_val(0.0015), "0.0015");
+        assert_eq!(fmt_val(0.0), "0");
+    }
+
+    #[test]
+    fn small_window_width_is_kept() {
+        let frame = Frame {
+            width: 1,
+            height: 1,
+            pixels: imaging::Pixels::Gray(vec![0.0]),
+            dicom_window: Some((0.0015, 0.003)),
+            dicom_windows: Vec::new(),
+            auto_window: (0.0015, 0.003),
+            min: 0.0,
+            max: 0.003,
+            inverted: false,
+        };
+        let w = WindowArgs { window_center: None, window_width: Some(0.001), invert: None };
+        let (_, ww, _) = pick_window(&frame, &w);
+        assert!((ww - 0.001).abs() < 1e-9);
+    }
+
+    #[test]
+    fn axial_orientation_text() {
+        let t = orientation_text([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert_eq!(
+            t,
+            "Top of image = anterior, bottom = posterior, image left = patient right, image right = patient left."
+        );
+    }
 }
