@@ -201,6 +201,11 @@ impl Action {
         })
     }
 
+    /// Skróty, które pole tekstowe obsługuje samo (cofanie w tekście, Ctrl+W – usuń słowo).
+    pub fn conflicts_with_text_edit(&self) -> bool {
+        matches!(self, Undo | Redo | CloseStudy)
+    }
+
     pub fn pro_only(&self) -> bool {
         matches!(self, ToolAngle | ToolEllipse | ToolRect | ToolProbe | ToolCursor3d | ExportTags | ToggleInfoPanel)
     }
@@ -214,6 +219,15 @@ pub const ALL: &[Action] = &[
     FirstSlice, LastSlice, ToolWindow, ToolPan, ToolZoom, ToolLine, ToolAngle, ToolEllipse, ToolRect, ToolArrow,
     ToolProbe, ToolCursor3d, PresetAuto, PresetDicom, PresetFull, Help, ConnectClaude, About, Quit,
 ];
+
+/// Skróty z modyfikatorami, od najbardziej szczegółowych (Ctrl+Shift+Z przed Ctrl+Z),
+/// bo `consume_shortcut` dopuszcza nadmiarowy Shift.
+pub fn shortcuts_by_specificity() -> Vec<(Action, KeyboardShortcut)> {
+    let count = |m: Modifiers| [m.alt, m.ctrl, m.shift, m.command || m.mac_cmd].iter().filter(|b| **b).count();
+    let mut list: Vec<_> = ALL.iter().filter_map(|a| a.shortcut().map(|s| (*a, s))).collect();
+    list.sort_by_key(|(_, s)| std::cmp::Reverse(count(s.modifiers)));
+    list
+}
 
 /// Struktura menu wspólna dla menu systemowego i menu w oknie.
 pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
@@ -364,6 +378,8 @@ pub mod native {
     use super::*;
     use muda::accelerator::{Accelerator, Code, Modifiers as MM};
     use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+    use std::sync::mpsc::{Receiver, channel};
+    use std::sync::{Mutex, OnceLock};
 
     fn code(key: Key) -> Option<Code> {
         Some(match key {
@@ -445,7 +461,18 @@ pub mod native {
         muda::Icon::from_rgba(img.into_raw(), w, h).ok()
     }
 
-    pub fn install() -> NativeMenu {
+    static EVENTS: OnceLock<Mutex<Receiver<MenuEvent>>> = OnceLock::new();
+
+    pub fn install(ctx: &egui::Context) -> NativeMenu {
+        // klik w menu nie jest zdarzeniem okna – trzeba obudzić egui, inaczej czeka na ruch myszy
+        let (tx, rx) = channel();
+        if EVENTS.set(Mutex::new(rx)).is_ok() {
+            let ctx = ctx.clone();
+            MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
+                let _ = tx.send(e);
+                ctx.request_repaint();
+            }));
+        }
         let menu = Menu::new();
         let mut keep: Vec<Box<dyn std::any::Any>> = Vec::new();
         let app = Submenu::new("MRI Viewer", true);
@@ -504,10 +531,41 @@ pub mod native {
     }
 
     pub fn poll(out: &mut Vec<Action>) {
-        while let Ok(ev) = MenuEvent::receiver().try_recv() {
+        let Some(rx) = EVENTS.get() else { return };
+        let rx = rx.lock().unwrap();
+        while let Ok(ev) = rx.try_recv() {
             if let Some(a) = Action::from_id(ev.id.as_ref()) {
                 out.push(a);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos(list: &[(Action, KeyboardShortcut)], a: Action) -> usize {
+        list.iter().position(|(x, _)| *x == a).unwrap()
+    }
+
+    #[test]
+    fn shift_variants_checked_first() {
+        let list = shortcuts_by_specificity();
+        for (more, less) in [(Redo, Undo), (OpenFile, OpenFolder), (SaveView, SaveImage), (RotateLeft, RotateRight)] {
+            assert!(pos(&list, more) < pos(&list, less), "{more:?} przed {less:?}");
+        }
+        assert_eq!(list.len(), ALL.iter().filter(|a| a.shortcut().is_some()).count());
+    }
+
+    #[test]
+    fn redo_not_taken_by_undo() {
+        // jak consume_shortcut: Ctrl+Shift+Z ma trafić w Ponów, nie w Cofnij
+        let pressed = Modifiers::COMMAND | Modifiers::SHIFT;
+        let hit = shortcuts_by_specificity()
+            .into_iter()
+            .find(|(_, s)| s.logical_key == Key::Z && pressed.matches_logically(s.modifiers))
+            .map(|(a, _)| a);
+        assert_eq!(hit, Some(Redo));
     }
 }
