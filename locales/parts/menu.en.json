@@ -43,7 +43,7 @@
   "menu.action.toggle_reference_lines": "Show/Hide Reference Lines",
   "menu.action.toggle_sidebar": "Show/Hide Series List",
   "menu.action.tool_angle": "Measure Angle (A)",
-  "menu.action.tool_arrow": "Arrow with Label (T)",
+  "menu.action.tool_arrow": "Arrow Annotation (T)",
   "menu.action.tool_cursor_3d": "3D Cursor – Show Point in Other Viewports (X)",
   "menu.action.tool_ellipse": "Elliptical ROI (E)",
   "menu.action.tool_line": "Measure Distance (M)",

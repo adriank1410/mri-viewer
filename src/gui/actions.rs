@@ -405,8 +405,8 @@ pub mod native {
     use super::*;
     use muda::accelerator::{Accelerator, Code, Modifiers as MM};
     use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
-    use std::sync::mpsc::{Receiver, channel};
     use std::cell::RefCell;
+    use std::sync::mpsc::{Receiver, channel};
     use std::sync::{Mutex, OnceLock};
 
     fn code(key: Key) -> Option<Code> {
@@ -562,7 +562,6 @@ pub mod native {
         let _ = menu.append(&app);
         keep.push(Box::new(settings));
         keep.push(Box::new(app));
-        let mut help = None;
         for (title, entries) in menu_spec() {
             let sub = Submenu::new(title.text(), true);
             build(&entries, &sub, &mut keep);
@@ -571,10 +570,9 @@ pub mod native {
             }
             let _ = menu.append(&sub);
             if title == MenuTitle::Help {
-                help = Some(sub);
-            } else {
-                keep.push(Box::new(sub));
+                sub.set_as_help_menu_for_nsapp();
             }
+            keep.push(Box::new(sub));
         }
         let window = Submenu::new(t!("menu.window"), true);
         let _ = window.append_items(&[
@@ -582,14 +580,9 @@ pub mod native {
             &PredefinedMenuItem::fullscreen(Some(t!("menu.window.fullscreen"))),
         ]);
         let _ = menu.append(&window);
-        menu.init_for_nsapp();
-        // muda szuka menu Pomoc i Okno w menu głównym NSApp, więc dopiero po init_for_nsapp
-        if let Some(help) = help {
-            help.set_as_help_menu_for_nsapp();
-            keep.push(Box::new(help));
-        }
         window.set_as_windows_menu_for_nsapp();
         keep.push(Box::new(window));
+        menu.init_for_nsapp();
         Built { _menu: menu, _keep: keep }
     }
 
