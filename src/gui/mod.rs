@@ -1027,11 +1027,10 @@ impl App {
                                             desc
                                         ));
                                         ui.label(if in_views.is_empty() { t } else { t.strong() });
-                                        ui.small(format!(
-                                            "{} · {} {}",
-                                            se.plane.pl(),
-                                            se.slices.len(),
-                                            library::plural_obraz(se.slices.len())
+                                        ui.small(crate::i18n::trn_args(
+                                            "app.sidebar.series_info",
+                                            se.slices.len() as u64,
+                                            &[("plane", &se.plane.pl())],
                                         ));
                                         if se.may_have_burned_in_text {
                                             ui.small(egui::RichText::new(t!("app.sidebar.burned_in")).color(Color32::from_rgb(230, 170, 80)))
