@@ -27,31 +27,31 @@ pub enum Tool {
 impl Tool {
     pub fn label(&self) -> &'static str {
         match self {
-            Tool::Window => "Jasność/kontrast",
-            Tool::Pan => "Przesuwanie",
-            Tool::Zoom => "Lupa",
-            Tool::Line => "Odległość",
-            Tool::Angle => "Kąt",
-            Tool::Ellipse => "Owal ROI",
-            Tool::Rect => "Prostokąt ROI",
-            Tool::Arrow => "Strzałka",
-            Tool::Probe => "Sonda",
-            Tool::Cursor3d => "Wskaźnik 3D",
+            Tool::Window => t!("view.tool.window"),
+            Tool::Pan => t!("view.tool.pan"),
+            Tool::Zoom => t!("view.tool.zoom"),
+            Tool::Line => t!("view.tool.line"),
+            Tool::Angle => t!("view.tool.angle"),
+            Tool::Ellipse => t!("view.tool.ellipse"),
+            Tool::Rect => t!("view.tool.rect"),
+            Tool::Arrow => t!("view.tool.arrow"),
+            Tool::Probe => t!("view.tool.probe"),
+            Tool::Cursor3d => t!("view.tool.cursor3d"),
         }
     }
 
     pub fn hint(&self) -> &'static str {
         match self {
-            Tool::Window => "Przeciągaj: w poziomie kontrast, w pionie jasność (W)",
-            Tool::Pan => "Przeciągaj, aby przesunąć obraz; prawy przycisk przesuwa zawsze (P)",
-            Tool::Zoom => "Przeciągaj w górę lub w dół, aby powiększyć; Cmd/Ctrl + kółko też działa (Z)",
-            Tool::Line => "Przeciągnij od punktu do punktu, aby zmierzyć odległość w mm (M)",
-            Tool::Angle => "Kliknij trzy punkty: ramię, wierzchołek, drugie ramię (A)",
-            Tool::Ellipse => "Przeciągnij, aby zaznaczyć owalny obszar – pokaże średnią jasność i pole (E)",
-            Tool::Rect => "Przeciągnij, aby zaznaczyć prostokątny obszar (O)",
-            Tool::Arrow => "Przeciągnij od wskazywanego miejsca, potem wpisz opis (T)",
-            Tool::Probe => "Kliknij, aby odczytać wartość piksela (V)",
-            Tool::Cursor3d => "Kliknij punkt – pozostałe okna przejdą do przekroju przez ten punkt (X)",
+            Tool::Window => t!("view.tool_hint.window"),
+            Tool::Pan => t!("view.tool_hint.pan"),
+            Tool::Zoom => t!("view.tool_hint.zoom"),
+            Tool::Line => t!("view.tool_hint.line"),
+            Tool::Angle => t!("view.tool_hint.angle"),
+            Tool::Ellipse => t!("view.tool_hint.ellipse"),
+            Tool::Rect => t!("view.tool_hint.rect"),
+            Tool::Arrow => t!("view.tool_hint.arrow"),
+            Tool::Probe => t!("view.tool_hint.probe"),
+            Tool::Cursor3d => t!("view.tool_hint.cursor3d"),
         }
     }
 
@@ -917,7 +917,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                     .order(egui::Order::Foreground)
                     .show(&ctx, |ui| {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.label("Opis (Enter – gotowe):");
+                            ui.label(t!("view.arrow_label_prompt"));
                             let r = ui.add(egui::TextEdit::singleline(text).desired_width(200.0));
                             r.request_focus();
                             if r.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)) {
@@ -940,15 +940,15 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
             if let Some(shape) = shape {
                 ui.label(egui::RichText::new(shape.name()).strong());
                 let result = ann::result_text(&shape, &frame, sp_opt, inp.units);
-                if !result.is_empty() && ui.button("Kopiuj wynik").clicked() {
+                if !result.is_empty() && ui.button(t!("view.context.copy_result")).clicked() {
                     ui.ctx().copy_text(result.replace('\n', "; "));
                     ui.close();
                 }
-                if matches!(shape, Shape::Arrow(..)) && ui.button("Edytuj opis").clicked() {
+                if matches!(shape, Shape::Arrow(..)) && ui.button(t!("view.context.edit_label")).clicked() {
                     vp.start_text_edit(&mut *inp.store, key, id);
                     ui.close();
                 }
-                if ui.button("Usuń ten pomiar").clicked() {
+                if ui.button(t!("view.context.delete_measurement")).clicked() {
                     vp.finish_text_edit(&mut *inp.store);
                     inp.store.delete(key, id);
                     vp.selected = None;
@@ -988,16 +988,18 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
             tl.push_str(&inp.patient_line);
             tl.push('\n');
         }
-        tl.push_str(&format!(
-            "{}{}\n",
-            series.number.map(|n| format!("Seria {n}: ")).unwrap_or_default(),
-            if series.description.is_empty() { "(bez opisu)" } else { &series.description }
-        ));
+        let description = if series.description.is_empty() { t!("view.overlay.no_description") } else { series.description.as_str() };
+        match series.number {
+            Some(number) => tl.push_str(&t!("view.overlay.series_numbered", number = number, description = description)),
+            None => tl.push_str(description),
+        }
+        tl.push('\n');
         tl.push_str(&match vp.plane {
-            ViewPlane::Native => format!("Płaszczyzna {}", series.plane.pl()),
-            ViewPlane::Reformat(p) => format!("Rekonstrukcja: {}", p.pl()),
+            ViewPlane::Native => t!("view.overlay.plane", plane = series.plane.pl()),
+            ViewPlane::Reformat(p) => t!("view.overlay.reformat", plane = p.pl()),
         });
-        tl.push_str(&format!("\nObraz {} / {}", vp.position() + 1, n));
+        tl.push('\n');
+        tl.push_str(&t!("view.overlay.image_position", current = vp.position() + 1, total = n));
         if vp.plane == ViewPlane::Native {
             if let Some(l) = series.slices.get(vp.slice).and_then(|s| s.slice_location) {
                 tl.push_str(&format!("  ({l:.1} mm)"));
@@ -1007,12 +1009,14 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
 
         let mut tr = format!("W {:.0}  L {:.0}", ww, wc);
         if vp.invert {
-            tr.push_str("  negatyw");
+            tr.push_str("  ");
+            tr.push_str(t!("view.overlay.inverted"));
         }
         if vp.colormap != Colormap::Gray {
             tr.push_str(&format!("\n{}", vp.colormap.label()));
         }
-        tr.push_str(&format!("\nPowiększenie {:.0}%", vp.zoom * 100.0));
+        tr.push('\n');
+        tr.push_str(&t!("view.overlay.zoom", percent = format!("{:.0}", vp.zoom * 100.0)));
         if !inp.study_date.is_empty() {
             tr.push_str(&format!("\n{}", fmt_date(&inp.study_date)));
         }
@@ -1021,7 +1025,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         let q = &series.sequence;
         let mut bl = Vec::new();
         if let Some(t) = series.slice_thickness {
-            bl.push(format!("Grubość warstwy {t:.1} mm"));
+            bl.push(t!("view.overlay.slice_thickness", thickness = format!("{t:.1}")));
         }
         if let (Some(tr), Some(te)) = (q.repetition_time, q.echo_time) {
             let mut s = format!("TR {tr:.0}  TE {te:.0}");
@@ -1031,20 +1035,16 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
             bl.push(s);
         }
         if settings.pro_mode {
-            bl.push(format!(
-                "Matryca {}×{}{}",
-                frame.width,
-                frame.height,
-                if inp.has_spacing {
-                    format!(
-                        "  FOV {:.0}×{:.0} mm",
-                        frame.width as f64 * inp.spacing.1,
-                        frame.height as f64 * inp.spacing.0
-                    )
-                } else {
-                    String::new()
-                }
-            ));
+            let mut matrix = t!("view.overlay.matrix", columns = frame.width, rows = frame.height);
+            if inp.has_spacing {
+                matrix.push_str("  ");
+                matrix.push_str(&t!(
+                    "view.overlay.fov",
+                    width = format!("{:.0}", frame.width as f64 * inp.spacing.1),
+                    height = format!("{:.0}", frame.height as f64 * inp.spacing.0)
+                ));
+            }
+            bl.push(matrix);
             if !q.sequence_name.is_empty() || !q.scanning_sequence.is_empty() {
                 bl.push(format!("{} {}", q.scanning_sequence, q.sequence_name).trim().to_string());
             }
@@ -1058,7 +1058,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                 &painter,
                 Pos2::new(rect.max.x - 8.0, rect.max.y - 34.0),
                 egui::Align2::RIGHT_BOTTOM,
-                format!("wczytano {}/{}", inp.loaded.0, inp.loaded.1),
+                t!("view.overlay.loaded", loaded = inp.loaded.0, total = inp.loaded.1),
                 font,
                 Color32::GRAY,
             );
@@ -1122,7 +1122,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         child.horizontal(|ui| {
             let resp = ui
                 .add(egui::Button::new("").min_size(Vec2::new(26.0, 20.0)))
-                .on_hover_text("Odtwarzaj / zatrzymaj (spacja)");
+                .on_hover_text(t!("view.cine.play_pause_tooltip"));
             // ikona rysowana, bo domyślne czcionki nie mają znaku pauzy
             let c = resp.rect.center();
             let col = ui.visuals().widgets.style(&resp).fg_stroke.color;
@@ -1155,7 +1155,8 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         if ip.x >= 0.0 && ip.y >= 0.0 && (ip.x as u32) < frame.width && (ip.y as u32) < frame.height {
             if let imaging::Pixels::Gray(v) = &frame.pixels {
                 let val = v[(ip.y as u32 * frame.width + ip.x as u32) as usize];
-                let mut s = format!("x {} y {}  wartość {:.0}{}", ip.x as u32, ip.y as u32, val, if inp.units.is_empty() { String::new() } else { format!(" {}", inp.units) });
+                let value = format!("{:.0}{}", val, if inp.units.is_empty() { String::new() } else { format!(" {}", inp.units) });
+                let mut s = t!("view.status.pixel_value", x = ip.x as u32, y = ip.y as u32, value = value);
                 if settings.pro_mode {
                     if let Some(pl) = vp.plane_geom {
                         let p = pl.to_patient(ip);
