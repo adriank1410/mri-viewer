@@ -31,7 +31,7 @@ Wersje dla Windows (`MRI-Viewer-Windows.zip`) i Linuksa (`MRI-Viewer-Linux.tar.g
    - lista **Płaszczyzna** pozwala obejrzeć rekonstrukcję w innej płaszczyźnie (najlepiej działa dla serii 3D z cienkimi warstwami).
 4. **Pomiary.** Narzędzie **Odległość** (M): przeciągnij od punktu do punktu, a orientacyjny wynik pojawi się w milimetrach (dokładność zależy od wielkości piksela i grubości warstwy). **Strzałka** (T) służy do opisania miejsca na obrazie. Kliknięty pomiar zostaje zaznaczony: można go przesuwać za środek, zmieniać końce za uchwyty i usunąć klawiszem **Delete** albo z menu pod prawym przyciskiem. **⌘Z / ⇧⌘Z** cofa i ponawia, a **Edycja → Usuń wszystkie pomiary** czyści wszystko. Kursor myszy zmienia się zależnie od narzędzia i tego, co jest pod nim.
 5. **Zapisywanie i eksport** (menu **Plik**): bieżący obraz (PNG/JPEG), widok razem z opisami i pomiarami, kopia widoku do schowka, cała seria jako osobne obrazy, animacja GIF, mozaika miniatur i tagi DICOM do pliku tekstowego.
-6. **Ustawienia** (⌘,): motyw jasny/ciemny, wielkość interfejsu i opisów, kolor pomiarów, co pokazywać na obrazie, kierunek i czułość kółka, prędkość odtwarzania, format eksportu, pamięć podręczna oraz ukrywanie danych osobowych pacjenta na ekranie (np. przy pokazywaniu komuś zrzutu).
+6. **Ustawienia** (⌘,): motyw jasny/ciemny, wielkość interfejsu i opisów, kolor pomiarów, co pokazywać na obrazie, kierunek i czułość kółka, prędkość odtwarzania, format eksportu, pamięć podręczna, język, wielkość tekstu i czcionka oraz ukrywanie danych osobowych pacjenta na ekranie (np. przy pokazywaniu komuś obrazu). Zapisywane i kopiowane widoki domyślnie nie zawierają imienia i nazwiska pacjenta – zamiast nich jest napis „Pacjent ukryty” z płcią i wiekiem.
 
 ### Tryb profesjonalny
 

@@ -96,6 +96,12 @@ pub struct App {
     job: JobHandle,
     shot_tx: Sender<(ShotPurpose, Rect, f32, Arc<ColorImage>)>,
     shot_rx: Receiver<(ShotPurpose, Rect, f32, Arc<ColorImage>)>,
+    /// Zrzut widoku czekający, aż klatka zostanie narysowana bez danych pacjenta.
+    pending_shot: Option<ShotPurpose>,
+    /// Dane pacjenta ukryte na czas robienia zrzutu do zapisu lub schowka.
+    shot_hide: bool,
+    /// Kiedy wysłano prośbę o zrzut – gdyby zrzut nie nadszedł, po chwili znów pokazujemy dane.
+    shot_sent: Option<std::time::Instant>,
     tags_cache: HashMap<PathBuf, Vec<(String, String, String)>>,
     tags_filter: String,
     info_tab: InfoTab,
@@ -144,6 +150,9 @@ impl App {
             job: Arc::new(Mutex::new(None)),
             shot_tx,
             shot_rx,
+            pending_shot: None,
+            shot_hide: false,
+            shot_sent: None,
             tags_cache: HashMap::new(),
             tags_filter: String::new(),
             info_tab: InfoTab::Series,
@@ -562,6 +571,19 @@ impl App {
     }
 
     fn request_view_shot(&mut self, ctx: &egui::Context, purpose: ShotPurpose) {
+        if self.settings.hide_patient_in_exports && !self.settings.hide_patient {
+            // najpierw jedna klatka bez danych pacjenta, zrzut dopiero po niej (koniec `ui`)
+            self.shot_hide = true;
+            self.pending_shot = Some(purpose);
+            ctx.request_repaint();
+            return;
+        }
+        self.send_view_shot(ctx, purpose);
+    }
+
+    fn send_view_shot(&mut self, ctx: &egui::Context, purpose: ShotPurpose) {
+        self.shot_sent = Some(std::time::Instant::now());
+        ctx.request_repaint_after(std::time::Duration::from_secs(3));
         let rect = self.viewports[self.active].rect;
         if !rect.is_positive() {
             return;
@@ -576,6 +598,9 @@ impl App {
     }
 
     fn handle_shot(&mut self, purpose: ShotPurpose, rect: Rect, ppp: f32, img: Arc<ColorImage>) {
+        if self.pending_shot.is_none() {
+            self.shot_hide = false;
+        }
         let [w, h] = img.size;
         let x0 = ((rect.min.x * ppp).round() as usize).min(w);
         let y0 = ((rect.min.y * ppp).round() as usize).min(h);
@@ -907,7 +932,7 @@ impl App {
     // --- panele ---------------------------------------------------------------------------------------
 
     fn patient_line(&self, st: &Study) -> String {
-        if self.settings.hide_patient {
+        if self.settings.hide_patient || self.shot_hide {
             let mut s = String::from("Pacjent ukryty");
             if !st.sex.is_empty() || !st.age.is_empty() {
                 s.push_str(&format!(" ({} {})", st.sex, st.age.trim_start_matches('0')));
@@ -1662,6 +1687,11 @@ fn help_ui(ui: &mut egui::Ui) {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // ta klatka jest rysowana bez danych pacjenta – po jej narysowaniu można zrobić zrzut
+        if self.shot_hide && self.pending_shot.is_none() && self.shot_sent.is_none_or(|t| t.elapsed().as_secs() >= 3) {
+            self.shot_hide = false;
+        }
+        let drawn_hidden = self.shot_hide;
         // wyniki pracy w tle
         if let Some(rx) = &self.scan_rx {
             let mut done = None;
@@ -1912,6 +1942,11 @@ impl eframe::App for App {
         let acts: Vec<Action> = std::mem::take(&mut self.pending);
         for a in acts {
             self.handle_action(a, &ctx);
+        }
+        if drawn_hidden {
+            if let Some(purpose) = self.pending_shot.take() {
+                self.send_view_shot(&ctx, purpose);
+            }
         }
         if self.settings_dirty {
             self.settings_dirty = false;

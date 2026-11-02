@@ -194,7 +194,14 @@ pub fn export_montage(series: Series, cache: Arc<FrameCache>, path: PathBuf, o: 
 }
 
 pub fn copy_to_clipboard(img: &RgbaImage) -> Result<()> {
-    let mut cb = arboard::Clipboard::new().map_err(|e| anyhow!("schowek niedostępny: {e}"))?;
+    // na Linuksie (X11/Wayland) zawartość schowka istnieje tylko, dopóki żyje jego właściciel –
+    // trzymamy więc jeden obiekt schowka przez cały czas działania programu
+    static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+    let mut guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(arboard::Clipboard::new().map_err(|e| anyhow!("schowek niedostępny: {e}"))?);
+    }
+    let cb = guard.as_mut().expect("schowek utworzony powyżej");
     cb.set_image(arboard::ImageData {
         width: img.width() as usize,
         height: img.height() as usize,
