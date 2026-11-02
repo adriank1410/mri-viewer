@@ -150,7 +150,7 @@ impl App {
             pending: Vec::new(),
             settings_dirty: false,
             #[cfg(target_os = "macos")]
-            _native_menu: Some(actions::native::install()),
+            _native_menu: Some(actions::native::install(&cc.egui_ctx)),
         };
         let start = folder.or_else(|| app.settings.last_folder.clone().map(PathBuf::from).filter(|p| p.is_dir()));
         if let Some(f) = start {
@@ -697,21 +697,27 @@ impl App {
             }
             Action::CopyView => self.request_view_shot(ctx, ShotPurpose::Clipboard),
             Action::ExportSeries => {
-                if let Some(dir) = rfd::FileDialog::new().set_title("Wybierz folder na obrazy serii").pick_folder() {
+                if export::busy(&self.job) {
+                    self.status = export::BUSY_MSG.into();
+                } else if let Some(dir) = rfd::FileDialog::new().set_title("Wybierz folder na obrazy serii").pick_folder() {
                     let o = self.render_opts(vi);
                     export::export_series(series, self.cache.clone(), dir, o, self.settings.export_format, self.settings.jpeg_quality, self.job.clone());
                 }
             }
             Action::ExportGif => {
                 let name = format!("{}.gif", export::series_base_name(&series));
-                if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("GIF", &["gif"]).save_file() {
+                if export::busy(&self.job) {
+                    self.status = export::BUSY_MSG.into();
+                } else if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("GIF", &["gif"]).save_file() {
                     let o = self.render_opts(vi);
                     export::export_gif(series, self.cache.clone(), path, o, self.settings.cine_fps, self.job.clone());
                 }
             }
             Action::ExportMontage => {
                 let name = format!("{}_mozaika.png", export::series_base_name(&series));
-                if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file() {
+                if export::busy(&self.job) {
+                    self.status = export::BUSY_MSG.into();
+                } else if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file() {
                     let o = self.render_opts(vi);
                     export::export_montage(series, self.cache.clone(), path, o, self.job.clone());
                 }
@@ -734,15 +740,33 @@ impl App {
 
     fn keyboard(&mut self, ctx: &egui::Context) {
         let mut acts = Vec::new();
+        // pole tekstowe ma fokus – cofanie i Ctrl+W należą do niego
+        let typing = ctx.egui_wants_keyboard_input();
         // skróty z modyfikatorami (na macOS obsługuje je menu systemowe)
         if !cfg!(target_os = "macos") {
-            for a in actions::ALL {
-                if let Some(s) = a.shortcut() {
-                    if ctx.input_mut(|i| i.consume_shortcut(&s)) {
-                        acts.push(*a);
-                    }
+            for (a, s) in actions::shortcuts_by_specificity() {
+                if typing && a.conflicts_with_text_edit() {
+                    continue;
+                }
+                if ctx.input_mut(|i| i.consume_shortcut(&s)) {
+                    acts.push(a);
                 }
             }
+        } else if typing {
+            // menu systemowe przechwytuje Cmd+Z – oddajemy cofanie polu tekstowemu
+            self.pending.retain(|a| {
+                let shift = match a {
+                    Action::Undo => false,
+                    Action::Redo => true,
+                    _ => return true,
+                };
+                let mut modifiers = egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND;
+                modifiers.shift = shift;
+                ctx.input_mut(|i| {
+                    i.events.push(egui::Event::Key { key: Key::Z, physical_key: None, pressed: true, repeat: false, modifiers })
+                });
+                false
+            });
         }
         if !ctx.egui_wants_keyboard_input() {
             ctx.input(|i| {
