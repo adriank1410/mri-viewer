@@ -34,6 +34,8 @@ struct Loader {
     generation: Arc<AtomicUsize>,
     target: Arc<AtomicUsize>,
     alive: Arc<AtomicUsize>,
+    /// Przekroje, których nie udało się odczytać – nie wczytujemy ich ponownie.
+    failed: Arc<Mutex<HashSet<usize>>>,
 }
 
 #[derive(Clone)]
@@ -78,6 +80,8 @@ pub struct App {
     settings: Settings,
     store: Store,
     cursor3d: Option<[f64; 3]>,
+    /// Układ współrzędnych, w którym ustawiono wskaźnik 3D.
+    cursor3d_frame: Option<FrameKey>,
     show_settings: bool,
     show_help: bool,
     show_about: bool,
@@ -125,6 +129,7 @@ impl App {
             settings,
             store: Store::default(),
             cursor3d: None,
+            cursor3d_frame: None,
             show_settings: false,
             show_help: false,
             show_about: false,
@@ -181,9 +186,16 @@ impl App {
         }
         self.loaders.clear();
         self.cache.clear();
+        // przerywamy trwające szukanie plików
+        self.scan_rx = None;
+        self.scan_progress = (0, 0);
+        // nowy kanał miniatur i nowa mapa błędów: wyniki zadań z poprzedniego badania trafiają w próżnię
+        let (thumb_tx, thumb_rx) = channel();
+        self.thumb_tx = thumb_tx;
+        self.thumb_rx = thumb_rx;
         self.thumbs.clear();
         self.thumbs_requested.clear();
-        self.errors.lock().unwrap().clear();
+        self.errors = Arc::new(Mutex::new(HashMap::new()));
         self.tags_cache.clear();
         let n = self.viewports.len();
         self.viewports = (0..n).map(|_| Viewport::new()).collect();
@@ -192,6 +204,7 @@ impl App {
         self.folder = None;
         self.store.reset();
         self.cursor3d = None;
+        self.cursor3d_frame = None;
     }
 
     fn choose_folder(&mut self, ctx: &egui::Context) {
@@ -237,12 +250,21 @@ impl App {
     }
 
     fn ensure_loader(&mut self, series: &Series, ctx: &egui::Context) {
+        let mut failed = Arc::new(Mutex::new(HashSet::new()));
         if let Some(l) = self.loaders.get(&series.id) {
-            if l.alive.load(Ordering::SeqCst) > 0 || series.slices.iter().all(|s| self.cache.peek(s).is_some()) {
+            if l.alive.load(Ordering::SeqCst) > 0 {
                 return;
             }
-            // wątki skończyły, ale część obrazów wypadła z pamięci – wczytujemy ponownie
-            self.loaders.remove(&series.id);
+            {
+                let bad = l.failed.lock().unwrap();
+                if series.slices.iter().enumerate().all(|(i, s)| bad.contains(&i) || self.cache.peek(s).is_some()) {
+                    return;
+                }
+            }
+            // wątki skończyły, ale część obrazów wypadła z pamięci – wczytujemy ponownie (bez uszkodzonych)
+            if let Some(old) = self.loaders.remove(&series.id) {
+                failed = old.failed;
+            }
         }
         let in_use: HashSet<usize> = self.viewports.iter().filter_map(|v| v.series_id).collect();
         self.loaders.retain(|id, l| {
@@ -258,12 +280,16 @@ impl App {
         let alive = Arc::new(AtomicUsize::new(workers));
         self.loaders.insert(
             series.id,
-            Loader { generation: generation.clone(), target: target.clone(), alive: alive.clone() },
+            Loader { generation: generation.clone(), target: target.clone(), alive: alive.clone(), failed: failed.clone() },
         );
         let slices = series.slices.clone();
         let sid = series.id;
-        let done: Arc<Mutex<Vec<bool>>> =
-            Arc::new(Mutex::new(slices.iter().map(|s| self.cache.peek(s).is_some()).collect()));
+        let done: Arc<Mutex<Vec<bool>>> = {
+            let bad = failed.lock().unwrap();
+            Arc::new(Mutex::new(
+                slices.iter().enumerate().map(|(i, s)| bad.contains(&i) || self.cache.peek(s).is_some()).collect(),
+            ))
+        };
         for _ in 0..workers {
             let slices = slices.clone();
             let cache = self.cache.clone();
@@ -273,6 +299,7 @@ impl App {
             let ctx = ctx.clone();
             let done = done.clone();
             let alive = alive.clone();
+            let failed = failed.clone();
             std::thread::spawn(move || {
                 loop {
                     if generation.load(Ordering::SeqCst) != 0 {
@@ -294,6 +321,7 @@ impl App {
                     };
                     let Some(i) = next else { break };
                     if let Err(e) = cache.get(&slices[i]) {
+                        failed.lock().unwrap().insert(i);
                         errors.lock().unwrap().insert(sid, format!("{e:#}"));
                     }
                     ctx.request_repaint();
@@ -425,6 +453,19 @@ impl App {
 
     // --- synchronizacja okien ------------------------------------------------------------------------
 
+    /// Układ współrzędnych serii (FrameOfReferenceUID i badanie).
+    fn frame_key(&self, s: &Series) -> FrameKey {
+        let study = self.lib.as_ref().and_then(|l| l.series_by_id(s.id)).map(|(st, _)| st.uid.clone()).unwrap_or_default();
+        FrameKey { frame_of_reference: s.frame_of_reference.clone(), study }
+    }
+
+    /// Układ współrzędnych serii pokazanej w oknie `vi`.
+    fn viewport_frame_key(&self, vi: usize) -> Option<FrameKey> {
+        let id = self.viewports.get(vi)?.series_id?;
+        let (st, s) = self.lib.as_ref()?.series_by_id(id)?;
+        Some(FrameKey { frame_of_reference: s.frame_of_reference.clone(), study: st.uid.clone() })
+    }
+
     /// Po zmianie przekroju w oknie `vi` ustawia pozostałe okna z równoległą płaszczyzną na to samo miejsce.
     fn sync_from(&mut self, vi: usize) {
         if self.viewports.len() < 2 || !self.settings.sync_scroll {
@@ -432,6 +473,7 @@ impl App {
         }
         let Some(src_series) = self.viewports[vi].series_id.and_then(|id| self.series(id)) else { return };
         let Some((_, _, Some(src_plane))) = self.current_frame(vi, &src_series) else { return };
+        let src_key = self.frame_key(&src_series);
         let center = src_plane.to_patient(Pos2::new(src_plane.w as f32 / 2.0, src_plane.h as f32 / 2.0));
         let n_src = src_plane.normal();
         for oi in 0..self.viewports.len() {
@@ -439,28 +481,58 @@ impl App {
                 continue;
             }
             let Some(s) = self.viewports[oi].series_id.and_then(|id| self.series(id)) else { continue };
+            // inne badanie / układ współrzędnych – położenia w mm nic nie mówią
+            if !self.frame_key(&s).matches(&src_key) {
+                continue;
+            }
             let Some(o) = s.orientation else { continue };
             let n = viewport::cross([o[0], o[1], o[2]], [o[3], o[4], o[5]]);
             if viewport::dot(n, n_src).abs() < 0.95 {
                 continue;
             }
             if let Some(best) = nearest_slice(&s, center, n) {
-                self.viewports[oi].set_position(&s, best as i64);
+                // set_position przerywa rysowanie pomiaru – tylko gdy przekrój naprawdę się zmienia
+                if best != self.viewports[oi].position() {
+                    self.viewports[oi].set_position(&s, best as i64);
+                }
             }
         }
     }
 
     fn apply_cursor3d(&mut self, src: usize, p: [f64; 3]) {
+        let Some(src_key) = self.viewport_frame_key(src) else { return };
         self.cursor3d = Some(p);
+        self.cursor3d_frame = Some(src_key.clone());
         for oi in 0..self.viewports.len() {
-            if oi == src || self.viewports[oi].plane != ViewPlane::Native {
+            if oi == src {
                 continue;
             }
             let Some(s) = self.viewports[oi].series_id.and_then(|id| self.series(id)) else { continue };
-            let Some(o) = s.orientation else { continue };
-            let n = viewport::cross([o[0], o[1], o[2]], [o[3], o[4], o[5]]);
-            if let Some(best) = nearest_slice(&s, p, n) {
-                self.viewports[oi].set_position(&s, best as i64);
+            if !self.frame_key(&s).matches(&src_key) {
+                continue;
+            }
+            let vp = &mut self.viewports[oi];
+            match vp.plane {
+                ViewPlane::Native => {
+                    let Some(o) = s.orientation else { continue };
+                    let n = viewport::cross([o[0], o[1], o[2]], [o[3], o[4], o[5]]);
+                    if let Some(best) = nearest_slice(&s, p, n) {
+                        if best != vp.position() {
+                            vp.set_position(&s, best as i64);
+                        }
+                    }
+                }
+                ViewPlane::Reformat(plane) => {
+                    // bez set_position: przed pierwszą rekonstrukcją liczba położeń nie jest jeszcze znana
+                    if let Some(idx) = reformat_index_for_point(&s, plane, p) {
+                        if idx != vp.reformat_pos {
+                            vp.reformat_pos = idx;
+                            vp.creating = None;
+                            vp.angle_stage = 0;
+                            vp.editing_text = None;
+                        }
+                    }
+                }
             }
         }
     }
@@ -532,7 +604,6 @@ impl App {
     }
 
     fn handle_action(&mut self, a: Action, ctx: &egui::Context) {
-        let series = self.active_series();
         let vi = self.active;
         match a {
             Action::OpenFolder => self.choose_folder(ctx),
@@ -621,8 +692,10 @@ impl App {
             _ => {}
         }
         // polecenia dotyczące bieżącego obrazu
-        let Some(series) = series else { return };
-        let vp = &mut self.viewports[vi];
+        // układ okien albo badanie mogły się właśnie zmienić (np. „Jedno okno”) – czytamy aktywne okno ponownie
+        let vi = self.active;
+        let Some(series) = self.active_series() else { return };
+        let Some(vp) = self.viewports.get_mut(vi) else { return };
         match a {
             Action::ResetView => vp.reset_view(),
             Action::FitWindow => {
@@ -1405,6 +1478,66 @@ fn dicom_tag_parse(s: &str) -> Option<dicom_object::Tag> {
     Some(dicom_object::Tag(u16::from_str_radix(g, 16).ok()?, u16::from_str_radix(e, 16).ok()?))
 }
 
+/// Układ współrzędnych pacjenta serii: punkty w mm można porównywać tylko w obrębie jednego układu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FrameKey {
+    frame_of_reference: String,
+    study: String,
+}
+
+impl FrameKey {
+    /// Ten sam FrameOfReferenceUID; gdy brak go w którejś serii – to samo badanie.
+    fn matches(&self, other: &FrameKey) -> bool {
+        if !self.frame_of_reference.is_empty() && !other.frame_of_reference.is_empty() {
+            self.frame_of_reference == other.frame_of_reference
+        } else {
+            self.study == other.study
+        }
+    }
+}
+
+/// Główna oś wektora (0 – x, 1 – y, 2 – z), jak w `mpr`.
+fn dominant_axis(v: &[f64; 3]) -> usize {
+    let a = [v[0].abs(), v[1].abs(), v[2].abs()];
+    if a[0] >= a[1] && a[0] >= a[2] {
+        0
+    } else if a[1] >= a[2] {
+        1
+    } else {
+        2
+    }
+}
+
+fn plane_from_normal(v: &[f64; 3]) -> library::Plane {
+    match dominant_axis(v) {
+        0 => library::Plane::Sagittal,
+        1 => library::Plane::Coronal,
+        _ => library::Plane::Axial,
+    }
+}
+
+/// Położenie rekonstrukcji `plane` przechodzącej przez punkt `p` (mm, LPS) – ta sama oś stała co w `mpr::reformat`.
+fn reformat_index_for_point(series: &Series, plane: library::Plane, p: [f64; 3]) -> Option<usize> {
+    let o = series.orientation?;
+    let p0 = series.slices.first()?.position?;
+    let r = [o[0], o[1], o[2]];
+    let c = [o[3], o[4], o[5]];
+    let (sr, sc) = series.pixel_spacing.unwrap_or((1.0, 1.0));
+    let d = [p[0] - p0[0], p[1] - p0[1], p[2] - p0[2]];
+    let (axis, sp, positions) = if plane_from_normal(&c) == plane {
+        (c, sr, series.rows as usize)
+    } else if plane_from_normal(&r) == plane {
+        (r, sc, series.columns as usize)
+    } else {
+        return None;
+    };
+    if positions == 0 || sp <= 0.0 {
+        return None;
+    }
+    let idx = (viewport::dot(d, axis) / sp).round();
+    Some(idx.clamp(0.0, (positions - 1) as f64) as usize)
+}
+
 fn nearest_slice(s: &Series, p: [f64; 3], n: [f64; 3]) -> Option<usize> {
     let target = viewport::dot(p, n);
     s.slices
@@ -1589,6 +1722,9 @@ impl eframe::App for App {
             let rh = full.height() / rows as f32;
             // płaszczyzny wszystkich okon (do linii odniesienia)
             let mut planes: Vec<Option<ImagePlane>> = vec![None; n];
+            let frame_keys: Vec<Option<FrameKey>> = (0..n).map(|vi| self.viewport_frame_key(vi)).collect();
+            // przekrój, dla którego pobrano obraz okna
+            let mut fetched: Vec<(u8, usize)> = Vec::with_capacity(n);
             let mut frames = Vec::with_capacity(n);
             for vi in 0..n {
                 let series = self.viewports[vi].series_id.and_then(|id| self.series(id));
@@ -1606,10 +1742,11 @@ impl eframe::App for App {
                 });
                 planes[vi] = f.as_ref().and_then(|x| x.2);
                 self.viewports[vi].plane_geom = planes[vi];
+                fetched.push((self.viewports[vi].plane_code(), self.viewports[vi].position()));
                 frames.push((series, f));
             }
             self.hover_status.clear();
-            for (vi, (series, f)) in frames.into_iter().enumerate() {
+            for (vi, (series, mut f)) in frames.into_iter().enumerate() {
                 let r = Rect::from_min_size(
                     Pos2::new(full.min.x + cw * (vi % cols) as f32, full.min.y + rh * (vi / cols) as f32),
                     Vec2::new(cw - 2.0, rh - 2.0),
@@ -1628,6 +1765,12 @@ impl eframe::App for App {
                     }
                     continue;
                 };
+                // okno przesunięte przez wcześniejsze okno (synchronizacja, wskaźnik 3D) – pobieramy obraz ponownie
+                if (self.viewports[vi].plane_code(), self.viewports[vi].position()) != fetched[vi] {
+                    f = self.current_frame(vi, &series);
+                    self.viewports[vi].plane_geom = f.as_ref().and_then(|x| x.2);
+                    fetched[vi] = (self.viewports[vi].plane_code(), self.viewports[vi].position());
+                }
                 let Some((frame, spacing, _)) = f else {
                     let p = child.painter_at(r);
                     p.rect_filled(r, 0.0, Color32::BLACK);
@@ -1640,17 +1783,28 @@ impl eframe::App for App {
                     continue;
                 };
                 let study = self.study_of(series.id);
+                // linie odniesienia tylko z okien w tym samym układzie współrzędnych
+                let same_frame = |oi: usize| match (&frame_keys[vi], &frame_keys[oi]) {
+                    (Some(a), Some(b)) => a.matches(b),
+                    _ => false,
+                };
                 let others: Vec<(ImagePlane, Color32)> = planes
                     .iter()
                     .enumerate()
-                    .filter(|(oi, p)| *oi != vi && p.is_some())
+                    .filter(|(oi, p)| *oi != vi && p.is_some() && same_frame(*oi))
                     .map(|(oi, p)| (p.unwrap(), viewport::VIEW_COLORS[oi % 4]))
                     .collect();
+                let cursor3d = match (&self.cursor3d_frame, &frame_keys[vi]) {
+                    (Some(a), Some(b)) if a.matches(b) => self.cursor3d,
+                    _ => None,
+                };
                 let loaded = (self.loaded_count(&series), series.slices.len());
                 let units: &'static str = if series.modality.eq_ignore_ascii_case("CT") { "HU" } else { "" };
                 let patient_line = study.as_ref().map(|s| self.patient_line(s)).unwrap_or_default();
                 let study_date = study.as_ref().map(|s| s.date.clone()).unwrap_or_default();
-                let has_spacing = series.pixel_spacing.is_some() || self.viewports[vi].plane != ViewPlane::Native;
+                // rekonstrukcja ma milimetry tylko przy znanym odstępie pikseli i przekrojów
+                let has_spacing = series.pixel_spacing.is_some()
+                    && (self.viewports[vi].plane == ViewPlane::Native || series.slice_gap().is_some());
                 let input = ViewInput {
                     series: &series,
                     frame,
@@ -1663,13 +1817,18 @@ impl eframe::App for App {
                     multi: n > 1,
                     index: vi,
                     others,
-                    cursor3d: self.cursor3d,
+                    cursor3d,
                     patient_line,
                     study_date,
                     units,
                     loaded,
                 };
                 let out = viewport::show(&mut child, &mut self.viewports[vi], input);
+                // przekrój zmienił się w trakcie rysowania – tekstura pochodzi z poprzedniego obrazu, odświeżamy ją
+                if (self.viewports[vi].plane_code(), self.viewports[vi].position()) != fetched[vi] {
+                    self.viewports[vi].tex_key = None;
+                    ctx.request_repaint();
+                }
                 if out.clicked {
                     self.active = vi;
                 }
@@ -1737,4 +1896,88 @@ pub fn app_icon() -> egui::IconData {
 fn is_localizer(s: &Series) -> bool {
     let d = s.description.to_lowercase();
     ["loc", "scout", "survey", "plan", "3pl"].iter().any(|k| d.contains(k))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::{Plane, SequenceInfo, Slice};
+
+    fn key(fr: &str, study: &str) -> FrameKey {
+        FrameKey { frame_of_reference: fr.into(), study: study.into() }
+    }
+
+    #[test]
+    fn frame_key_compares_frame_of_reference_then_study() {
+        assert!(key("1.2", "A").matches(&key("1.2", "B")));
+        assert!(!key("1.2", "A").matches(&key("1.3", "A")));
+        // brak UID w jednej z serii – decyduje badanie
+        assert!(key("", "A").matches(&key("1.3", "A")));
+        assert!(!key("", "A").matches(&key("", "B")));
+    }
+
+    /// Seria poprzeczna: wiersze wzdłuż y, kolumny wzdłuż x, przekroje co 2 mm wzdłuż z.
+    fn axial_series(n: usize) -> Series {
+        Series {
+            id: 1,
+            uid: "s".into(),
+            number: None,
+            description: String::new(),
+            modality: "MR".into(),
+            body_part: String::new(),
+            plane: Plane::Axial,
+            rows: 12,
+            columns: 10,
+            pixel_spacing: Some((0.5, 0.8)),
+            slice_thickness: None,
+            spacing_between_slices: None,
+            orientation: Some([1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+            frame_of_reference: String::new(),
+            sequence: SequenceInfo::default(),
+            series_date: String::new(),
+            series_time: String::new(),
+            slices: (0..n)
+                .map(|k| Slice {
+                    path: PathBuf::from(format!("{k}.dcm")),
+                    frame: 0,
+                    instance_number: None,
+                    position: Some([-50.0, -60.0, 10.0 + 2.0 * k as f64]),
+                    slice_location: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn reformat_index_for_point_matches_mpr_origin() {
+        let s = axial_series(8);
+        let frames: Vec<Arc<Frame>> = (0..8)
+            .map(|_| {
+                Arc::new(Frame {
+                    width: 10,
+                    height: 12,
+                    pixels: Pixels::Gray(vec![0.0; 120]),
+                    dicom_window: None,
+                    dicom_windows: Vec::new(),
+                    auto_window: (0.0, 1.0),
+                    min: 0.0,
+                    max: 0.0,
+                    inverted: false,
+                })
+            })
+            .collect();
+        for plane in [Plane::Coronal, Plane::Sagittal] {
+            for idx in [0, 3, 7] {
+                let rf = mpr::reformat(&s, &frames, plane, Some(idx)).unwrap();
+                let o = rf.origin.unwrap();
+                assert_eq!(reformat_index_for_point(&s, plane, o), Some(idx), "{plane:?} {idx}");
+            }
+        }
+        // płaszczyzna akwizycji nie jest rekonstrukcją
+        assert_eq!(reformat_index_for_point(&s, Plane::Axial, [0.0; 3]), None);
+        // punkt poza serią – skrajne położenie
+        assert_eq!(reformat_index_for_point(&s, Plane::Coronal, [0.0, -500.0, 0.0]), Some(0));
+        assert_eq!(reformat_index_for_point(&s, Plane::Coronal, [0.0, 500.0, 0.0]), Some(11));
+        assert_eq!(reformat_index_for_point(&s, Plane::Sagittal, [-50.0 + 0.8 * 4.0, 0.0, 0.0]), Some(4));
+    }
 }
