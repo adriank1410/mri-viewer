@@ -995,8 +995,8 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         }
         tl.push('\n');
         tl.push_str(&match vp.plane {
-            ViewPlane::Native => t!("view.overlay.plane", plane = series.plane.pl()),
-            ViewPlane::Reformat(p) => t!("view.overlay.reformat", plane = p.pl()),
+            ViewPlane::Native => t!("view.overlay.plane", plane = series.plane.label()),
+            ViewPlane::Reformat(p) => t!("view.overlay.reformat", plane = p.label()),
         });
         tl.push('\n');
         tl.push_str(&t!("view.overlay.image_position", current = vp.position() + 1, total = n));

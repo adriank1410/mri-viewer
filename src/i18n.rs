@@ -7,8 +7,6 @@
 //!
 //! Dodanie języka: nowy plik w `locales/` i jeden wiersz w [`LANGS`].
 
-#![allow(dead_code)] // TODO: usunąć po podpięciu tłumaczeń w interfejsie
-
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{OnceLock, RwLock};

@@ -820,7 +820,7 @@ impl App {
             Action::CopyView => self.request_view_shot(ctx, ShotPurpose::Clipboard),
             Action::ExportSeries => {
                 if export::busy(&self.job) {
-                    self.status = export::BUSY_MSG.into();
+                    self.status = export::busy_msg().into();
                 } else if let Some(dir) = rfd::FileDialog::new().set_title(t!("app.dialog.choose_export_folder")).pick_folder() {
                     let o = self.render_opts(vi);
                     export::export_series(series, self.cache.clone(), dir, o, self.settings.export_format, self.settings.jpeg_quality, self.job.clone());
@@ -829,7 +829,7 @@ impl App {
             Action::ExportGif => {
                 let name = format!("{}.gif", export::series_base_name(&series));
                 if export::busy(&self.job) {
-                    self.status = export::BUSY_MSG.into();
+                    self.status = export::busy_msg().into();
                 } else if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("GIF", &["gif"]).save_file() {
                     let o = self.render_opts(vi);
                     export::export_gif(series, self.cache.clone(), path, o, self.settings.cine_fps, self.job.clone());
@@ -838,7 +838,7 @@ impl App {
             Action::ExportMontage => {
                 let name = format!("{}.png", t!("app.file.montage", series = export::series_base_name(&series)));
                 if export::busy(&self.job) {
-                    self.status = export::BUSY_MSG.into();
+                    self.status = export::busy_msg().into();
                 } else if let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file() {
                     let o = self.render_opts(vi);
                     export::export_montage(series, self.cache.clone(), path, o, self.job.clone());
@@ -1030,7 +1030,7 @@ impl App {
                                         ui.small(crate::i18n::trn_args(
                                             "app.sidebar.series_info",
                                             se.slices.len() as u64,
-                                            &[("plane", &se.plane.pl())],
+                                            &[("plane", &se.plane.label())],
                                         ));
                                         if se.may_have_burned_in_text {
                                             ui.small(egui::RichText::new(t!("app.sidebar.burned_in")).color(Color32::from_rgb(230, 170, 80)))
@@ -1224,10 +1224,10 @@ impl App {
             return None;
         }
         Some(match (self.viewports[self.active].plane, compact) {
-            (ViewPlane::Native, true) => series.plane.pl().to_string(),
-            (ViewPlane::Native, false) => t!("app.toolbar.plane", plane = series.plane.pl()),
-            (ViewPlane::Reformat(p), true) => t!("app.toolbar.plane_reformat_short", plane = p.pl()),
-            (ViewPlane::Reformat(p), false) => t!("app.toolbar.plane_reformat", plane = p.pl()),
+            (ViewPlane::Native, true) => series.plane.label().to_string(),
+            (ViewPlane::Native, false) => t!("app.toolbar.plane", plane = series.plane.label()),
+            (ViewPlane::Reformat(p), true) => t!("app.toolbar.plane_reformat_short", plane = p.label()),
+            (ViewPlane::Reformat(p), false) => t!("app.toolbar.plane_reformat", plane = p.label()),
         })
     }
 
@@ -1331,12 +1331,12 @@ impl App {
         egui::ComboBox::from_id_salt("plane")
             .selected_text(current)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(vp.plane == ViewPlane::Native, t!("app.toolbar.plane_original", plane = series.plane.pl())).clicked() {
+                if ui.selectable_label(vp.plane == ViewPlane::Native, t!("app.toolbar.plane_original", plane = series.plane.label())).clicked() {
                     vp.plane = ViewPlane::Native;
                     vp.tex_key = None;
                 }
                 for p in planes {
-                    if ui.selectable_label(vp.plane == ViewPlane::Reformat(p), t!("app.toolbar.plane_reformat_item", plane = p.pl())).clicked() {
+                    if ui.selectable_label(vp.plane == ViewPlane::Reformat(p), t!("app.toolbar.plane_reformat_item", plane = p.label())).clicked() {
                         vp.plane = ViewPlane::Reformat(p);
                         vp.reformat_pos = usize::MAX;
                         vp.tex_key = None;
@@ -1371,7 +1371,7 @@ impl App {
                     (t!("app.info.row.modality"), series.modality.clone()),
                     (t!("app.info.row.body_part"), series.body_part.clone()),
                     (t!("app.info.row.protocol"), q.protocol_name.clone()),
-                    (t!("app.info.row.plane"), series.plane.pl().to_string()),
+                    (t!("app.info.row.plane"), series.plane.label().to_string()),
                     (t!("app.info.row.image_count"), series.slices.len().to_string()),
                     (t!("app.info.row.matrix"), format!("{} × {}", series.columns, series.rows)),
                     (t!("app.info.row.pixel"), series.pixel_spacing.map(|(r, c)| format!("{c:.3} × {r:.3} mm")).unwrap_or("—".into())),

@@ -174,11 +174,11 @@ impl Colormap {
 
     pub fn label(&self) -> &'static str {
         match self {
-            Colormap::Gray => "Skala szarości",
-            Colormap::Hot => "Gorąca (żelazo)",
-            Colormap::Bone => "Kość",
-            Colormap::Rainbow => "Tęcza",
-            Colormap::Cool => "Chłodna",
+            Colormap::Gray => t!("colormap.gray"),
+            Colormap::Hot => t!("colormap.hot"),
+            Colormap::Bone => t!("colormap.bone"),
+            Colormap::Rainbow => t!("colormap.rainbow"),
+            Colormap::Cool => t!("colormap.cool"),
         }
     }
 
@@ -397,10 +397,11 @@ pub fn dump_tags(path: &Path, anonymize: bool) -> Result<String> {
             .map(|e| e.alias().to_string())
             .unwrap_or_else(|| "?".into());
         let value = if anonymize && (is_identifying(tag) || el.vr() == VR::PN) {
-            "[ukryte]".to_string()
+            // zrzut tagów jest techniczny i trafia też do MCP – opisy po angielsku
+            "[hidden]".to_string()
         } else {
             match el.value() {
-                Value::Sequence(seq) => format!("<sekwencja, {} elem.>", seq.items().len()),
+                Value::Sequence(seq) => format!("<sequence, {} items>", seq.items().len()),
                 Value::PixelSequence(_) => continue,
                 Value::Primitive(_) => {
                     if matches!(el.vr(), VR::OB | VR::OW | VR::OF | VR::OD | VR::UN) {
