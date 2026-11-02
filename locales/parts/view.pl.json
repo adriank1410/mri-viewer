@@ -21,6 +21,7 @@
   "view.overlay.reformat": "Rekonstrukcja: {plane}",
   "view.overlay.series_numbered": "Seria {number}: {description}",
   "view.overlay.slice_thickness": "Grubość warstwy {thickness} mm",
+  "view.overlay.window_level": "W {width}  L {level}",
   "view.overlay.zoom": "Powiększenie {percent}%",
   "view.status.pixel_value": "x {x} y {y}  wartość {value}",
   "view.tool.angle": "Kąt",

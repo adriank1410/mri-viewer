@@ -1007,7 +1007,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         }
         text_with_shadow(&painter, rect.min + Vec2::new(8.0, 8.0), egui::Align2::LEFT_TOP, tl, font, white);
 
-        let mut tr = format!("W {:.0}  L {:.0}", ww, wc);
+        let mut tr = t!("view.overlay.window_level", width = format!("{:.0}", ww), level = format!("{:.0}", wc));
         if vp.invert {
             tr.push_str("  ");
             tr.push_str(t!("view.overlay.inverted"));
