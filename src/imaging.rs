@@ -259,21 +259,6 @@ pub fn dump_tags(path: &Path, anonymize: bool) -> Result<String> {
         .open_file(path)?;
     let dict = StandardDataDictionary;
     let mut out = String::new();
-    let private_names = [
-        tags::PATIENT_NAME,
-        tags::PATIENT_ID,
-        tags::PATIENT_BIRTH_DATE,
-        tags::PATIENT_ADDRESS,
-        tags::PATIENT_TELEPHONE_NUMBERS,
-        tags::OTHER_PATIENT_NAMES,
-        tags::PATIENT_MOTHER_BIRTH_NAME,
-        tags::REFERRING_PHYSICIAN_NAME,
-        tags::ACCESSION_NUMBER,
-        tags::INSTITUTION_ADDRESS,
-        tags::OPERATORS_NAME,
-        tags::PERFORMING_PHYSICIAN_NAME,
-        tags::NAME_OF_PHYSICIANS_READING_STUDY,
-    ];
     for el in obj.iter() {
         let tag = el.tag();
         if tag.group() % 2 == 1 {
@@ -283,7 +268,7 @@ pub fn dump_tags(path: &Path, anonymize: bool) -> Result<String> {
             .by_tag(tag)
             .map(|e| e.alias().to_string())
             .unwrap_or_else(|| "?".into());
-        let value = if anonymize && private_names.contains(&tag) {
+        let value = if anonymize && (is_identifying(tag) || el.vr() == VR::PN) {
             "[ukryte]".to_string()
         } else {
             match el.value() {
@@ -307,6 +292,40 @@ pub fn dump_tags(path: &Path, anonymize: bool) -> Result<String> {
         ));
     }
     Ok(out)
+}
+
+/// Czy element nagłówka może identyfikować pacjenta, personel albo placówkę.
+/// Z grupy pacjenta (0010) zostawiamy tylko płeć, wiek, wzrost i wagę.
+pub fn is_identifying(tag: dicom_object::Tag) -> bool {
+    let (g, e) = (tag.group(), tag.element());
+    match g {
+        0x0010 => !matches!(e, 0x0040 | 0x1010 | 0x1020 | 0x1030),
+        0x0008 => matches!(
+            e,
+            0x0050 // AccessionNumber
+                | 0x0080 // InstitutionName
+                | 0x0081 // InstitutionAddress
+                | 0x0082 // InstitutionCodeSequence
+                | 0x0090 // ReferringPhysicianName
+                | 0x0092 // ReferringPhysicianAddress
+                | 0x0094 // ReferringPhysicianTelephoneNumbers
+                | 0x0096 // ReferringPhysicianIdentificationSequence
+                | 0x1010 // StationName
+                | 0x1040 // InstitutionalDepartmentName
+                | 0x1048 // PhysiciansOfRecord
+                | 0x1049
+                | 0x1050 // PerformingPhysicianName
+                | 0x1052
+                | 0x1060 // NameOfPhysiciansReadingStudy
+                | 0x1062
+                | 0x1070 // OperatorsName
+                | 0x1072
+        ),
+        0x0020 => e == 0x0010, // StudyID
+        // zlecenie, rejestracja wizyty, kroki procedury – numery zleceń, nazwiska
+        0x0032 | 0x0038 | 0x0040 => true,
+        _ => false,
+    }
 }
 
 /// Statystyki wartości pikseli w prostokącie (współrzędne w pikselach obrazu).
@@ -337,3 +356,43 @@ pub fn region_stats(frame: &Frame, x: u32, y: u32, w: u32, h: u32) -> Option<(f6
     Some((mean, sd, mn, mx, n))
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dicom_object::Tag;
+
+    #[test]
+    fn identifying_tags_are_hidden() {
+        for t in [
+            tags::PATIENT_NAME,
+            tags::PATIENT_ID,
+            tags::PATIENT_BIRTH_DATE,
+            Tag(0x0010, 0x1000), // OtherPatientIDs (np. PESEL)
+            Tag(0x0010, 0x1002), // OtherPatientIDsSequence
+            tags::ISSUER_OF_PATIENT_ID,
+            tags::PATIENT_ADDRESS,
+            tags::INSTITUTION_NAME,
+            tags::INSTITUTION_ADDRESS,
+            tags::REFERRING_PHYSICIAN_NAME,
+            tags::OPERATORS_NAME,
+            tags::ACCESSION_NUMBER,
+            tags::STATION_NAME,
+            tags::STUDY_ID,
+            tags::REQUESTING_PHYSICIAN,
+        ] {
+            assert!(is_identifying(t), "{t} powinien być ukryty");
+        }
+        for t in [
+            tags::PATIENT_SEX,
+            tags::PATIENT_AGE,
+            tags::PATIENT_WEIGHT,
+            tags::STUDY_DATE,
+            tags::SERIES_DESCRIPTION,
+            tags::REPETITION_TIME,
+            tags::PIXEL_SPACING,
+        ] {
+            assert!(!is_identifying(t), "{t} nie powinien być ukryty");
+        }
+    }
+}
