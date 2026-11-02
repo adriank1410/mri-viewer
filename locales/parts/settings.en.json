@@ -51,5 +51,5 @@
   "settings.theme.label": "Theme:",
   "settings.theme.light": "light",
   "settings.theme.system": "follow system",
-  "settings.ui_scale": "Interface size:"
+  "settings.ui_scale": "Interface scale:"
 }
