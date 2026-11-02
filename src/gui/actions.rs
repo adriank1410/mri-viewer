@@ -66,7 +66,33 @@ pub enum Action {
 pub enum Entry {
     Item(Action),
     Sep,
-    Sub(&'static str, Vec<Entry>),
+    Sub(MenuTitle, Vec<Entry>),
+}
+
+/// Nazwy menu i podmenu. Tekst jest tłumaczony przy każdym użyciu, bo język może się zmienić w trakcie pracy.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuTitle {
+    File,
+    Edit,
+    View,
+    Image,
+    Tools,
+    Help,
+    Export,
+}
+
+impl MenuTitle {
+    pub fn text(&self) -> &'static str {
+        match self {
+            MenuTitle::File => t!("menu.file"),
+            MenuTitle::Edit => t!("menu.edit"),
+            MenuTitle::View => t!("menu.view"),
+            MenuTitle::Image => t!("menu.image"),
+            MenuTitle::Tools => t!("menu.tools"),
+            MenuTitle::Help => t!("menu.help"),
+            MenuTitle::Export => t!("menu.export"),
+        }
+    }
 }
 
 use Action::*;
@@ -84,63 +110,63 @@ impl Action {
 
     pub fn label(&self) -> &'static str {
         match self {
-            OpenFolder => "Otwórz folder z badaniem…",
-            OpenFile => "Otwórz plik DICOM…",
-            CloseStudy => "Zamknij badanie",
-            SaveImage => "Zapisz obraz…",
-            SaveView => "Zapisz widok z opisami i pomiarami…",
-            CopyView => "Kopiuj widok do schowka",
-            ExportSeries => "Eksportuj całą serię jako obrazy…",
-            ExportGif => "Eksportuj serię jako animację GIF…",
-            ExportMontage => "Eksportuj mozaikę miniatur…",
-            ExportTags => "Eksportuj tagi DICOM do pliku tekstowego…",
-            Undo => "Cofnij",
-            Redo => "Ponów",
-            DeleteSelected => "Usuń zaznaczony pomiar (Delete)",
-            DeleteSliceAnnotations => "Usuń pomiary z tego obrazu",
-            DeleteAllAnnotations => "Usuń wszystkie pomiary",
-            Settings => "Ustawienia…",
-            Layout1 => "Jedno okno",
-            Layout2 => "Dwa okna obok siebie",
-            Layout4 => "Cztery okna (2 × 2)",
-            ResetView => "Resetuj widok (R)",
-            FitWindow => "Dopasuj do okna",
-            Zoom100 => "Rzeczywisty rozmiar (1:1)",
-            ZoomIn => "Powiększ",
-            ZoomOut => "Pomniejsz",
-            RotateRight => "Obróć w prawo",
-            RotateLeft => "Obróć w lewo",
-            FlipH => "Odbij w poziomie",
-            FlipV => "Odbij w pionie",
-            Invert => "Negatyw (I)",
-            ToggleOverlay => "Pokaż/ukryj opisy na obrazie",
-            ToggleReferenceLines => "Pokaż/ukryj linie odniesienia",
-            ToggleSidebar => "Pokaż/ukryj listę serii",
-            ToggleInfoPanel => "Pokaż/ukryj panel informacji",
-            ToggleFullscreen => "Pełny ekran",
-            TogglePro => "Tryb profesjonalny",
-            PlayPause => "Odtwarzaj / zatrzymaj (spacja)",
-            NextSlice => "Następny obraz (↓)",
-            PrevSlice => "Poprzedni obraz (↑)",
-            FirstSlice => "Pierwszy obraz (Home)",
-            LastSlice => "Ostatni obraz (End)",
-            ToolWindow => "Jasność i kontrast (W)",
-            ToolPan => "Przesuwanie (P)",
-            ToolZoom => "Lupa / powiększanie (Z)",
-            ToolLine => "Pomiar odległości (M)",
-            ToolAngle => "Pomiar kąta (A)",
-            ToolEllipse => "Obszar owalny – ROI (E)",
-            ToolRect => "Obszar prostokątny – ROI (O)",
-            ToolArrow => "Strzałka z opisem (T)",
-            ToolProbe => "Sonda – wartość punktu (V)",
-            ToolCursor3d => "Wskaźnik 3D – pokaż punkt w innych oknach (X)",
-            PresetAuto => "Okno automatyczne",
-            PresetDicom => "Okno z aparatu",
-            PresetFull => "Pełny zakres",
-            Help => "Pomoc i skróty klawiszowe",
-            ConnectClaude => "Podłącz do Claude (MCP)…",
-            About => "O programie",
-            Quit => "Zakończ",
+            OpenFolder => t!("menu.action.open_folder"),
+            OpenFile => t!("menu.action.open_file"),
+            CloseStudy => t!("menu.action.close_study"),
+            SaveImage => t!("menu.action.save_image"),
+            SaveView => t!("menu.action.save_view"),
+            CopyView => t!("menu.action.copy_view"),
+            ExportSeries => t!("menu.action.export_series"),
+            ExportGif => t!("menu.action.export_gif"),
+            ExportMontage => t!("menu.action.export_montage"),
+            ExportTags => t!("menu.action.export_tags"),
+            Undo => t!("menu.action.undo"),
+            Redo => t!("menu.action.redo"),
+            DeleteSelected => t!("menu.action.delete_selected"),
+            DeleteSliceAnnotations => t!("menu.action.delete_slice_annotations"),
+            DeleteAllAnnotations => t!("menu.action.delete_all_annotations"),
+            Settings => t!("menu.action.settings"),
+            Layout1 => t!("menu.action.layout_1"),
+            Layout2 => t!("menu.action.layout_2"),
+            Layout4 => t!("menu.action.layout_4"),
+            ResetView => t!("menu.action.reset_view"),
+            FitWindow => t!("menu.action.fit_window"),
+            Zoom100 => t!("menu.action.zoom_100"),
+            ZoomIn => t!("menu.action.zoom_in"),
+            ZoomOut => t!("menu.action.zoom_out"),
+            RotateRight => t!("menu.action.rotate_right"),
+            RotateLeft => t!("menu.action.rotate_left"),
+            FlipH => t!("menu.action.flip_h"),
+            FlipV => t!("menu.action.flip_v"),
+            Invert => t!("menu.action.invert"),
+            ToggleOverlay => t!("menu.action.toggle_overlay"),
+            ToggleReferenceLines => t!("menu.action.toggle_reference_lines"),
+            ToggleSidebar => t!("menu.action.toggle_sidebar"),
+            ToggleInfoPanel => t!("menu.action.toggle_info_panel"),
+            ToggleFullscreen => t!("menu.action.toggle_fullscreen"),
+            TogglePro => t!("menu.action.toggle_pro"),
+            PlayPause => t!("menu.action.play_pause"),
+            NextSlice => t!("menu.action.next_slice"),
+            PrevSlice => t!("menu.action.prev_slice"),
+            FirstSlice => t!("menu.action.first_slice"),
+            LastSlice => t!("menu.action.last_slice"),
+            ToolWindow => t!("menu.action.tool_window"),
+            ToolPan => t!("menu.action.tool_pan"),
+            ToolZoom => t!("menu.action.tool_zoom"),
+            ToolLine => t!("menu.action.tool_line"),
+            ToolAngle => t!("menu.action.tool_angle"),
+            ToolEllipse => t!("menu.action.tool_ellipse"),
+            ToolRect => t!("menu.action.tool_rect"),
+            ToolArrow => t!("menu.action.tool_arrow"),
+            ToolProbe => t!("menu.action.tool_probe"),
+            ToolCursor3d => t!("menu.action.tool_cursor_3d"),
+            PresetAuto => t!("menu.action.preset_auto"),
+            PresetDicom => t!("menu.action.preset_dicom"),
+            PresetFull => t!("menu.action.preset_full"),
+            Help => t!("menu.action.help"),
+            ConnectClaude => t!("menu.action.connect_claude"),
+            About => t!("menu.action.about"),
+            Quit => t!("menu.action.quit"),
         }
     }
 
@@ -231,10 +257,10 @@ pub fn shortcuts_by_specificity() -> Vec<(Action, KeyboardShortcut)> {
 }
 
 /// Struktura menu wspólna dla menu systemowego i menu w oknie.
-pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
+pub fn menu_spec() -> Vec<(MenuTitle, Vec<Entry>)> {
     vec![
         (
-            "Plik",
+            MenuTitle::File,
             vec![
                 Item(OpenFolder),
                 Item(OpenFile),
@@ -244,7 +270,7 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
                 Item(CopyView),
                 Sep,
                 Sub(
-                    "Eksportuj",
+                    MenuTitle::Export,
                     vec![Item(ExportSeries), Item(ExportGif), Item(ExportMontage), Item(ExportTags)],
                 ),
                 Sep,
@@ -252,7 +278,7 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
             ],
         ),
         (
-            "Edycja",
+            MenuTitle::Edit,
             vec![
                 Item(Undo),
                 Item(Redo),
@@ -263,7 +289,7 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
             ],
         ),
         (
-            "Widok",
+            MenuTitle::View,
             vec![
                 Item(Layout1),
                 Item(Layout2),
@@ -288,7 +314,7 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
             ],
         ),
         (
-            "Obraz",
+            MenuTitle::Image,
             vec![
                 Item(PlayPause),
                 Item(NextSlice),
@@ -303,7 +329,7 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
             ],
         ),
         (
-            "Narzędzia",
+            MenuTitle::Tools,
             vec![
                 Item(ToolWindow),
                 Item(ToolPan),
@@ -320,7 +346,7 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
                 Item(TogglePro),
             ],
         ),
-        ("Pomoc", vec![Item(Help), Item(ConnectClaude), Sep, Item(About)]),
+        (MenuTitle::Help, vec![Item(Help), Item(ConnectClaude), Sep, Item(About)]),
     ]
 }
 
@@ -328,13 +354,13 @@ pub fn menu_spec() -> Vec<(&'static str, Vec<Entry>)> {
 pub fn egui_menu(ui: &mut egui::Ui, pro: bool, out: &mut Vec<Action>) {
     egui::MenuBar::new().ui(ui, |ui| {
         for (title, entries) in menu_spec() {
-            ui.menu_button(title, |ui| {
+            ui.menu_button(title.text(), |ui| {
                 entries_ui(ui, &entries, pro, out);
-                if title == "Edycja" {
+                if title == MenuTitle::Edit {
                     ui.separator();
                     item_ui(ui, Settings, out);
                 }
-                if title == "Plik" {
+                if title == MenuTitle::File {
                     ui.separator();
                     item_ui(ui, Quit, out);
                 }
@@ -367,7 +393,7 @@ fn entries_ui(ui: &mut egui::Ui, entries: &[Entry], pro: bool, out: &mut Vec<Act
                 ui.separator();
             }
             Sub(title, items) => {
-                ui.menu_button(*title, |ui| entries_ui(ui, items, pro, out));
+                ui.menu_button(title.text(), |ui| entries_ui(ui, items, pro, out));
             }
         }
     }
@@ -380,6 +406,7 @@ pub mod native {
     use muda::accelerator::{Accelerator, Code, Modifiers as MM};
     use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use std::sync::mpsc::{Receiver, channel};
+    use std::cell::RefCell;
     use std::sync::{Mutex, OnceLock};
 
     fn code(key: Key) -> Option<Code> {
@@ -442,7 +469,7 @@ pub mod native {
                     let _ = sub.append(&PredefinedMenuItem::separator());
                 }
                 Entry::Sub(title, items) => {
-                    let s = Submenu::new(*title, true);
+                    let s = Submenu::new(title.text(), true);
                     build(items, &s, keep);
                     let _ = sub.append(&s);
                     keep.push(Box::new(s));
@@ -451,9 +478,21 @@ pub mod native {
         }
     }
 
+    /// Znacznik zainstalowanego menu. Samo menu (z elementami) żyje w `CURRENT`,
+    /// żeby [`rebuild_menu`] mógł je podmienić po zmianie języka.
     pub struct NativeMenu {
+        _private: (),
+    }
+
+    /// Zbudowane menu wraz z elementami, które muszą żyć tak długo jak ono.
+    struct Built {
         _menu: Menu,
         _keep: Vec<Box<dyn std::any::Any>>,
+    }
+
+    thread_local! {
+        // muda::Menu nie jest Send – menu tworzymy i trzymamy w wątku głównym
+        static CURRENT: RefCell<Option<Built>> = const { RefCell::new(None) };
     }
 
     fn about_icon() -> Option<muda::Icon> {
@@ -474,13 +513,29 @@ pub mod native {
                 ctx.request_repaint();
             }));
         }
+        rebuild_menu();
+        NativeMenu { _private: () }
+    }
+
+    /// Buduje menu od nowa w bieżącym języku (razem z danymi okna „O programie”) i podmienia je w NSApp.
+    /// Identyfikatory poleceń i kanał zdarzeń zostają te same, więc [`poll`] działa dalej.
+    /// Wywoływać z wątku głównego, np. z `update` po zmianie języka.
+    pub fn rebuild_menu() {
+        let built = build_menu();
+        // stare menu zwalniamy dopiero po podmianie w NSApp
+        let old = CURRENT.with(|c| c.borrow_mut().replace(built));
+        drop(old);
+    }
+
+    fn build_menu() -> Built {
         let menu = Menu::new();
         let mut keep: Vec<Box<dyn std::any::Any>> = Vec::new();
+        // nazwa programu w pasku menu – macOS i tak pokazuje tu nazwę z pakietu aplikacji
         let app = Submenu::new("MRI Viewer", true);
         let about = PredefinedMenuItem::about(
-            Some("O programie Przeglądarka MRI"),
+            Some(t!("menu.app.about")),
             Some(AboutMetadata {
-                name: Some("Przeglądarka MRI".into()),
+                name: Some(t!("menu.app.name").into()),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
                 // pusty numer kompilacji – inaczej macOS pokazuje „0.2.0 (0.2.0)”
                 short_version: Some(String::new()),
@@ -496,39 +551,46 @@ pub mod native {
             &PredefinedMenuItem::separator(),
             &settings,
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::services(Some("Usługi")),
+            &PredefinedMenuItem::services(Some(t!("menu.app.services"))),
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::hide(Some("Ukryj Przeglądarkę MRI")),
-            &PredefinedMenuItem::hide_others(Some("Ukryj pozostałe")),
-            &PredefinedMenuItem::show_all(Some("Pokaż wszystkie")),
+            &PredefinedMenuItem::hide(Some(t!("menu.app.hide"))),
+            &PredefinedMenuItem::hide_others(Some(t!("menu.app.hide_others"))),
+            &PredefinedMenuItem::show_all(Some(t!("menu.app.show_all"))),
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::quit(Some("Zakończ Przeglądarkę MRI")),
+            &PredefinedMenuItem::quit(Some(t!("menu.app.quit"))),
         ]);
         let _ = menu.append(&app);
         keep.push(Box::new(settings));
         keep.push(Box::new(app));
+        let mut help = None;
         for (title, entries) in menu_spec() {
-            let sub = Submenu::new(title, true);
+            let sub = Submenu::new(title.text(), true);
             build(&entries, &sub, &mut keep);
-            if title == "Widok" {
+            if title == MenuTitle::View {
                 // okno systemowe: minimalizacja
             }
             let _ = menu.append(&sub);
-            if title == "Pomoc" {
-                sub.set_as_help_menu_for_nsapp();
+            if title == MenuTitle::Help {
+                help = Some(sub);
+            } else {
+                keep.push(Box::new(sub));
             }
-            keep.push(Box::new(sub));
         }
-        let window = Submenu::new("Okno", true);
+        let window = Submenu::new(t!("menu.window"), true);
         let _ = window.append_items(&[
-            &PredefinedMenuItem::minimize(Some("Minimalizuj")),
-            &PredefinedMenuItem::fullscreen(Some("Pełny ekran")),
+            &PredefinedMenuItem::minimize(Some(t!("menu.window.minimize"))),
+            &PredefinedMenuItem::fullscreen(Some(t!("menu.window.fullscreen"))),
         ]);
         let _ = menu.append(&window);
+        menu.init_for_nsapp();
+        // muda szuka menu Pomoc i Okno w menu głównym NSApp, więc dopiero po init_for_nsapp
+        if let Some(help) = help {
+            help.set_as_help_menu_for_nsapp();
+            keep.push(Box::new(help));
+        }
         window.set_as_windows_menu_for_nsapp();
         keep.push(Box::new(window));
-        menu.init_for_nsapp();
-        NativeMenu { _menu: menu, _keep: keep }
+        Built { _menu: menu, _keep: keep }
     }
 
     pub fn poll(out: &mut Vec<Action>) {
