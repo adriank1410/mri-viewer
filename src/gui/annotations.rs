@@ -203,7 +203,8 @@ pub enum Hit {
 }
 
 /// Szuka pomiaru pod kursorem (współrzędne ekranowe).
-pub fn hit_test(anns: &[Ann], p: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2) -> Option<Hit> {
+/// `inside(id)` – czy wnętrze obszaru ROI też chwyta mysz (inaczej tylko obrys i uchwyty).
+pub fn hit_test(anns: &[Ann], p: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2, inside: &dyn Fn(u64) -> bool) -> Option<Hit> {
     for a in anns.iter().rev() {
         for (i, h) in a.shape.points().iter().enumerate() {
             if to_screen(*h).distance(p) <= 8.0 {
@@ -225,7 +226,7 @@ pub fn hit_test(anns: &[Ann], p: Pos2, to_screen: &dyn Fn(Pos2) -> Pos2) -> Opti
                 };
                 let sp: Vec<Pos2> = pts.iter().map(|q| to_screen(*q)).collect();
                 let near_edge = (0..sp.len()).any(|i| dist_to_segment(p, sp[i], sp[(i + 1) % sp.len()]) <= 6.0);
-                near_edge || point_in_polygon(p, &sp)
+                near_edge || (inside(a.id) && point_in_polygon(p, &sp))
             }
             Shape::Probe(q) => to_screen(*q).distance(p) <= 8.0,
         };
@@ -364,11 +365,25 @@ impl Store {
 
     /// Zapamiętuje stan obrazu przed zmianą (do cofnięcia).
     pub fn checkpoint(&mut self, key: Key) {
-        self.undo.push(vec![(key, self.get(&key).to_vec())]);
+        self.push_snapshot(key, self.get(&key).to_vec());
+    }
+
+    /// Zapisuje do cofnięcia stan obrazu sprzed zmiany, zapamiętany wcześniej.
+    pub fn push_snapshot(&mut self, key: Key, before: Vec<Ann>) {
+        self.undo.push(vec![(key, before)]);
         if self.undo.len() > 200 {
             self.undo.remove(0);
         }
         self.redo.clear();
+    }
+
+    /// Jak `push_snapshot`, ale tylko gdy obraz rzeczywiście się zmienił. Zwraca, czy zapisano.
+    pub fn commit_if_changed(&mut self, key: Key, before: Vec<Ann>) -> bool {
+        if self.get(&key) == before.as_slice() {
+            return false;
+        }
+        self.push_snapshot(key, before);
+        true
     }
 
     pub fn add(&mut self, key: Key, shape: Shape) -> u64 {
@@ -473,6 +488,37 @@ mod tests {
         assert_eq!(s.count(), 0);
         assert!(s.undo());
         assert_eq!(s.count(), 2);
+    }
+
+    #[test]
+    fn commit_only_when_changed() {
+        let mut s = Store::default();
+        let k = (1, 0, 0);
+        let id = s.add(k, Shape::Line([Pos2::ZERO, Pos2::new(10.0, 0.0)]));
+        assert!(s.undo());
+        assert!(s.redo());
+        // przeciągnięcie bez zmiany nie dotyka historii (redo zostaje)
+        assert!(s.undo());
+        let before = s.get(&k).to_vec();
+        assert!(!s.commit_if_changed(k, before));
+        assert!(s.redo());
+        // zmiana jest zapisywana i daje się cofnąć
+        let before = s.get(&k).to_vec();
+        s.find_mut(&k, id).unwrap().shape.set_point(1, Pos2::new(20.0, 0.0));
+        assert!(s.commit_if_changed(k, before));
+        assert!(s.undo());
+        assert_eq!(s.get(&k)[0].shape.points()[1], Pos2::new(10.0, 0.0));
+    }
+
+    #[test]
+    fn roi_interior_hit_only_when_allowed() {
+        let anns = vec![Ann { id: 7, shape: Shape::Ellipse([Pos2::ZERO, Pos2::new(100.0, 100.0)]) }];
+        let id = |p: Pos2| p;
+        let centre = Pos2::new(50.0, 50.0);
+        assert_eq!(hit_test(&anns, centre, &id, &|_| false), None);
+        assert_eq!(hit_test(&anns, centre, &id, &|i| i == 7), Some(Hit::Body(7)));
+        // obrys chwyta zawsze
+        assert_eq!(hit_test(&anns, Pos2::new(50.0, 1.0), &id, &|_| false), Some(Hit::Body(7)));
     }
 
     #[test]

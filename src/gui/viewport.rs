@@ -108,6 +108,7 @@ impl ViewTransform {
 }
 
 /// Płaszczyzna obrazu w przestrzeni pacjenta (LPS, mm).
+/// `origin` to środek piksela (0, 0) jak w DICOM; we współrzędnych obrazu (tekstury) leży on w (0,5; 0,5).
 #[derive(Clone, Copy, Debug)]
 pub struct ImagePlane {
     pub origin: [f64; 3],
@@ -135,7 +136,7 @@ impl ImagePlane {
         cross(self.xdir, self.ydir)
     }
     pub fn to_patient(&self, p: Pos2) -> [f64; 3] {
-        let (x, y) = (p.x as f64 * self.sx, p.y as f64 * self.sy);
+        let (x, y) = ((p.x as f64 - 0.5) * self.sx, (p.y as f64 - 0.5) * self.sy);
         [
             self.origin[0] + x * self.xdir[0] + y * self.ydir[0],
             self.origin[1] + x * self.xdir[1] + y * self.ydir[1],
@@ -146,7 +147,7 @@ impl ImagePlane {
     pub fn project(&self, p: [f64; 3]) -> (Pos2, f64) {
         let d = sub(p, self.origin);
         (
-            Pos2::new((dot(d, self.xdir) / self.sx) as f32, (dot(d, self.ydir) / self.sy) as f32),
+            Pos2::new((dot(d, self.xdir) / self.sx + 0.5) as f32, (dot(d, self.ydir) / self.sy + 0.5) as f32),
             dot(d, self.normal()),
         )
     }
@@ -155,7 +156,8 @@ impl ImagePlane {
         let n = other.normal();
         let a = self.sx * dot(n, self.xdir);
         let b = self.sy * dot(n, self.ydir);
-        let d = dot(n, sub(self.origin, other.origin));
+        // przesunięcie o pół piksela: równanie dla współrzędnych tekstury, nie indeksów pikseli
+        let d = dot(n, sub(self.origin, other.origin)) - 0.5 * (a + b);
         if a.abs() < 1e-6 && b.abs() < 1e-6 {
             return None;
         }
@@ -181,6 +183,31 @@ impl ImagePlane {
         pts.dedup_by(|p, q| p.distance(*q) < 0.5);
         if pts.len() >= 2 { Some([pts[0], pts[1]]) } else { None }
     }
+}
+
+/// Odstęp między kolejnymi położeniami okna (mm, prostopadle do płaszczyzny):
+/// dla przekrojów natywnych odstęp przekrojów, dla rekonstrukcji odstęp wzdłuż stałej osi serii.
+fn depth_step(series: &Series, plane: ViewPlane, pl: &ImagePlane) -> f64 {
+    let (sr, sc) = series.pixel_spacing.unwrap_or((1.0, 1.0));
+    let gap = series.slice_gap().unwrap_or(match plane {
+        ViewPlane::Native => 3.0,
+        ViewPlane::Reformat(_) => sr.max(sc),
+    });
+    match (plane, series.orientation) {
+        (ViewPlane::Reformat(_), Some(o)) => step_along(pl.normal(), o, (sr, sc, gap)),
+        _ => gap,
+    }
+}
+
+/// Odstęp wzdłuż osi serii (kolumny, wiersze, przekroje) najbliższej kierunkowi `n`.
+/// `sp` – (wiersze, kolumny, przekroje) w mm.
+fn step_along(n: [f64; 3], o: [f64; 6], sp: (f64, f64, f64)) -> f64 {
+    let (r, c) = ([o[0], o[1], o[2]], [o[3], o[4], o[5]]);
+    [(dot(n, r).abs(), sp.1), (dot(n, c).abs(), sp.0), (dot(n, cross(r, c)).abs(), sp.2)]
+        .into_iter()
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, s)| s)
+        .unwrap_or(sp.2)
 }
 
 /// Litery stron ciała dla kierunku w układzie LPS.
@@ -232,6 +259,10 @@ pub struct Viewport {
     pub angle_stage: u8,
     pub selected: Option<u64>,
     pub editing_text: Option<u64>,
+    /// Stan obrazu sprzed przeciągania pomiaru (zapis do cofnięcia tylko przy zmianie).
+    pub drag_before: Option<(Key, Vec<ann::Ann>)>,
+    /// Stan obrazu sprzed edycji opisu istniejącej strzałki.
+    pub edit_before: Option<(Key, Vec<ann::Ann>)>,
     pub context_target: Option<u64>,
     pub plane_geom: Option<ImagePlane>,
     pub rect: Rect,
@@ -264,6 +295,8 @@ impl Viewport {
             angle_stage: 0,
             selected: None,
             editing_text: None,
+            drag_before: None,
+            edit_before: None,
             context_target: None,
             plane_geom: None,
             rect: Rect::NOTHING,
@@ -316,6 +349,21 @@ impl Viewport {
         self.creating = None;
         self.angle_stage = 0;
         self.editing_text = None;
+    }
+
+    /// Kończy edycję opisu strzałki; zmianę opisu zapisuje do cofnięcia.
+    fn finish_text_edit(&mut self, store: &mut Store) {
+        self.editing_text = None;
+        if let Some((k, before)) = self.edit_before.take() {
+            store.commit_if_changed(k, before);
+        }
+    }
+
+    /// Rozpoczyna edycję opisu istniejącej strzałki.
+    fn start_text_edit(&mut self, store: &mut Store, key: Key, id: u64) {
+        self.finish_text_edit(store);
+        self.edit_before = Some((key, store.get(&key).to_vec()));
+        self.editing_text = Some(id);
     }
 
     pub fn step(&mut self, series: &Series, delta: i64) {
@@ -427,6 +475,9 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     if resp.clicked() || resp.drag_started() || resp.secondary_clicked() {
         out.clicked = true;
     }
+    if vp.editing_text.is_none() && vp.edit_before.is_some() {
+        vp.finish_text_edit(inp.store);
+    }
     let series = inp.series;
     let frame = inp.frame.clone();
     let settings = inp.settings;
@@ -510,20 +561,29 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     let key = vp.key().unwrap_or((0, 0, 0));
     let anns: Vec<ann::Ann> = inp.store.get(&key).to_vec();
     let hover_img = resp.hover_pos().map(|p| map.to_image(p));
+    // wnętrze ROI chwyta mysz tylko przy narzędziach ROI (owal, prostokąt) – pozostałe narzędzia
+    // działają też wewnątrz obszaru; obrys i uchwyty chwytają zawsze
+    let roi_tool = matches!(inp.tool, Tool::Ellipse | Tool::Rect);
+    let sel = vp.selected;
+    let grab_inside = move |id: u64| roi_tool && sel == Some(id);
+    let click_inside = move |_: u64| roi_tool;
 
     // --- mysz: przeciąganie -----------------------------------------------------------------------
     let primary_down = resp.drag_started_by(egui::PointerButton::Primary);
     if primary_down {
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos()).unwrap_or(rect.center());
-        let hit = if vp.creating.is_none() { ann::hit_test(&anns, press, &|p| map.to_screen(p)) } else { None };
+        if vp.editing_text.is_some() {
+            vp.finish_text_edit(inp.store);
+        }
+        let hit = if vp.creating.is_none() { ann::hit_test(&anns, press, &|p| map.to_screen(p), &grab_inside) } else { None };
         match hit {
             Some(Hit::Handle(id, i)) => {
-                inp.store.checkpoint(key);
+                vp.drag_before = Some((key, anns.clone()));
                 vp.selected = Some(id);
                 vp.drag = Drag::Handle(id, i);
             }
             Some(Hit::Body(id)) => {
-                inp.store.checkpoint(key);
+                vp.drag_before = Some((key, anns.clone()));
                 vp.selected = Some(id);
                 vp.drag = Drag::Body(id);
             }
@@ -569,6 +629,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         vp.drag = Drag::Pan;
     }
     let dragging = resp.dragged();
+    let angle_stage = vp.angle_stage;
     if dragging {
         let d = resp.drag_delta();
         let cur_img = resp.interact_pointer_pos().map(|p| map.to_image(p));
@@ -601,7 +662,10 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                 if let (Some(s), Some(p)) = (vp.creating.as_mut(), cur_img) {
                     match s {
                         Shape::Angle(_) => {
-                            s.set_point(1, p);
+                            // wierzchołek przesuwamy tylko przed jego ustaleniem
+                            if angle_stage < 2 {
+                                s.set_point(1, p);
+                            }
                             s.set_point(2, p);
                         }
                         _ => s.set_point(1, p),
@@ -624,7 +688,13 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                     let long_enough = map.to_screen(pts[0]).distance(map.to_screen(pts[1])) > 4.0;
                     match s {
                         Shape::Angle(_) => {
-                            if long_enough {
+                            if vp.angle_stage == 2 {
+                                // przeciągnięcie przy trzecim punkcie kończy kąt jak kliknięcie
+                                let id = inp.store.add(key, s);
+                                vp.selected = Some(id);
+                                vp.creating = None;
+                                vp.angle_stage = 0;
+                            } else if long_enough {
                                 vp.angle_stage = 2;
                             }
                         }
@@ -645,7 +715,11 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                     }
                 }
             }
-            Drag::Handle(..) | Drag::Body(_) => {}
+            Drag::Handle(..) | Drag::Body(_) => {
+                if let Some((k, before)) = vp.drag_before.take() {
+                    inp.store.commit_if_changed(k, before);
+                }
+            }
             _ => {}
         }
         vp.drag = Drag::None;
@@ -655,7 +729,10 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     if resp.clicked() {
         let p = resp.interact_pointer_pos().unwrap_or(rect.center());
         let ip = map.to_image(p);
-        let hit = if vp.creating.is_none() { ann::hit_test(&anns, p, &|q| map.to_screen(q)) } else { None };
+        if vp.editing_text.is_some() {
+            vp.finish_text_edit(inp.store);
+        }
+        let hit = if vp.creating.is_none() { ann::hit_test(&anns, p, &|q| map.to_screen(q), &click_inside) } else { None };
         if let Some(Hit::Handle(id, _) | Hit::Body(id)) = hit {
             vp.selected = Some(id);
         } else {
@@ -708,10 +785,10 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     }
     if resp.double_clicked() && vp.creating.is_none() {
         let p = resp.interact_pointer_pos().unwrap_or(rect.center());
-        match ann::hit_test(&anns, p, &|q| map.to_screen(q)) {
+        match ann::hit_test(&anns, p, &|q| map.to_screen(q), &grab_inside) {
             Some(Hit::Handle(id, _) | Hit::Body(id)) => {
                 if matches!(inp.store.find(&key, id).map(|a| &a.shape), Some(Shape::Arrow(..))) {
-                    vp.editing_text = Some(id);
+                    vp.start_text_edit(inp.store, key, id);
                 }
             }
             None => {
@@ -722,7 +799,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     }
     if resp.secondary_clicked() {
         let p = resp.interact_pointer_pos().unwrap_or(rect.center());
-        vp.context_target = match ann::hit_test(&anns, p, &|q| map.to_screen(q)) {
+        vp.context_target = match ann::hit_test(&anns, p, &|q| map.to_screen(q), &|_| true) {
             Some(Hit::Handle(id, _) | Hit::Body(id)) => {
                 vp.selected = Some(id);
                 Some(id)
@@ -736,7 +813,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         let icon = match vp.drag {
             Drag::Handle(..) | Drag::Body(_) => CursorIcon::Grabbing,
             Drag::Pan => CursorIcon::Grabbing,
-            _ => match resp.hover_pos().and_then(|p| ann::hit_test(&anns, p, &|q| map.to_screen(q))) {
+            _ => match resp.hover_pos().and_then(|p| ann::hit_test(&anns, p, &|q| map.to_screen(q), &grab_inside)) {
                 Some(Hit::Handle(..)) if vp.creating.is_none() => CursorIcon::Move,
                 Some(Hit::Body(_)) if vp.creating.is_none() => CursorIcon::Grab,
                 _ => inp.tool.cursor(dragging),
@@ -802,7 +879,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         }
         if let Some(c) = inp.cursor3d {
             let (p, dist) = pl.project(c);
-            let tol = (pl.sx.max(pl.sy) * 2.0).max(series.slice_gap().unwrap_or(3.0) * 0.75);
+            let tol = (depth_step(series, vp.plane, &pl) * 0.75).max(0.25);
             let s = map.to_screen(p);
             let col = if dist.abs() <= tol { Color32::from_rgb(255, 80, 80) } else { Color32::from_rgba_unmultiplied(255, 80, 80, 90) };
             painter.circle_stroke(s, 9.0, Stroke::new(1.5, col));
@@ -823,10 +900,12 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     }
     // edycja opisu strzałki
     if let Some(id) = vp.editing_text {
+        // gdy strzałki już nie ma, edycja też się kończy
+        let mut done = true;
         if let Some(a) = inp.store.find_mut(&key, id) {
             if let Shape::Arrow(pts, text) = &mut a.shape {
                 let at = map.to_screen(pts[1]) + Vec2::new(6.0, 2.0);
-                let mut done = false;
+                done = false;
                 egui::Area::new(egui::Id::unique(("arrow_text", inp.index, id)))
                     .fixed_pos(at)
                     .order(egui::Order::Foreground)
@@ -840,14 +919,10 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                             }
                         });
                     });
-                if done {
-                    vp.editing_text = None;
-                }
-            } else {
-                vp.editing_text = None;
             }
-        } else {
-            vp.editing_text = None;
+        }
+        if done {
+            vp.finish_text_edit(inp.store);
         }
     }
 
@@ -864,7 +939,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
                     ui.close();
                 }
                 if matches!(shape, Shape::Arrow(..)) && ui.button("Edytuj opis").clicked() {
-                    vp.editing_text = Some(id);
+                    vp.start_text_edit(&mut *inp.store, key, id);
                     ui.close();
                 }
                 if ui.button("Usuń ten pomiar").clicked() {
@@ -1085,4 +1160,44 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn axial() -> ImagePlane {
+        ImagePlane { origin: [10.0, 20.0, 30.0], xdir: [1.0, 0.0, 0.0], ydir: [0.0, 1.0, 0.0], sx: 0.5, sy: 0.5, w: 100, h: 100 }
+    }
+
+    #[test]
+    fn pixel_centre_maps_to_origin() {
+        let pl = axial();
+        // środek piksela (0, 0) to (0,5; 0,5) we współrzędnych tekstury
+        let p = pl.to_patient(Pos2::new(0.5, 0.5));
+        assert!((p[0] - 10.0).abs() < 1e-9 && (p[1] - 20.0).abs() < 1e-9);
+        let (q, d) = pl.project([10.0 + 3.0 * 0.5, 20.0, 30.0]);
+        assert!((q.x - 3.5).abs() < 1e-5 && (q.y - 0.5).abs() < 1e-5 && d.abs() < 1e-9);
+        let back = pl.to_patient(q);
+        assert!((back[0] - 11.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn intersection_passes_through_pixel_centre() {
+        let pl = axial();
+        // płaszczyzna strzałkowa przez środek kolumny 4 (x = 12 mm)
+        let sag = ImagePlane { origin: [12.0, 20.0, 30.0], xdir: [0.0, 1.0, 0.0], ydir: [0.0, 0.0, -1.0], sx: 0.5, sy: 1.0, w: 100, h: 50 };
+        let [a, b] = pl.intersection(&sag).unwrap();
+        assert!((a.x - 4.5).abs() < 1e-4 && (b.x - 4.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn depth_step_uses_fixed_axis() {
+        // stos osiowy: kolumny 0,9 mm, wiersze 0,8 mm, przekroje co 6 mm
+        let o = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let sp = (0.8, 0.9, 6.0);
+        assert_eq!(step_along([1.0, 0.0, 0.0], o, sp), 0.9); // strzałkowa
+        assert_eq!(step_along([0.0, -1.0, 0.0], o, sp), 0.8); // czołowa
+        assert_eq!(step_along([0.0, 0.0, 1.0], o, sp), 6.0);
+    }
 }
