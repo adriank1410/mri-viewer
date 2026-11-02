@@ -11,6 +11,7 @@
   <key>CFBundleShortVersionString</key><string>VERSION</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.medical</string>
 </dict>
 </plist>

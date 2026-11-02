@@ -20,17 +20,30 @@ Wersje dla Windows (`MRI-Viewer-Windows.zip`) i Linuksa (`MRI-Viewer-Linux.tar.g
 
 ## Jak oglądać badanie
 
-1. Uruchom program i kliknij **„Otwórz folder z badaniem…”**. Wskaż folder skopiowany z płyty (np. `Pobrane/MRI`). Możesz też przeciągnąć folder na okno programu. Program sam przeszuka podfoldery i nie potrzebuje pliku DICOMDIR.
+1. Uruchom program i kliknij **„Otwórz folder z badaniem…”** (albo **Plik → Otwórz folder**, ⌘O). Wskaż folder skopiowany z płyty (np. `Pobrane/MRI`). Możesz też przeciągnąć folder na okno programu. Program sam przeszuka podfoldery i nie potrzebuje pliku DICOMDIR. Ostatnio otwierane foldery są na ekranie startowym.
 2. Po lewej zobaczysz badania (z datą) i ich **serie**, czyli zestawy zdjęć wykonanych w różnych ustawieniach (np. T1, T2, STIR) i płaszczyznach: poprzecznej (plastry oglądane od stóp), strzałkowej (z boku) i czołowej (od przodu). Kliknij serię, aby ją wyświetlić.
-3. Obsługa:
-   - **kółko myszy** lub strzałki – kolejne przekroje; suwak na dole pokazuje numer obrazu,
-   - **przeciąganie lewym przyciskiem** – jasność (w pionie) i kontrast (w poziomie),
-   - **prawy przycisk** – przesuwanie obrazu, **Cmd + kółko** albo gest szczypania – powiększenie,
-   - **dwuklik** albo klawisz **R** – powrót do widoku początkowego, **I** – negatyw, **spacja** – automatyczne odtwarzanie,
-   - **Pomiar** – kliknij dwa punkty, aby zmierzyć odległość w milimetrach,
-   - **Porównanie (2 okna)** – dwa obrazy obok siebie (np. T1 i T2 albo stare i nowe badanie); Shift + klik na serii wczytuje ją do drugiego okna,
-   - lista nad obrazem pozwala obejrzeć **rekonstrukcję w innej płaszczyźnie** (najlepiej działa dla serii 3D z cienkimi warstwami),
-   - **Zapisz PNG** – zapisuje bieżący obraz, np. żeby wysłać go lekarzowi albo wkleić do rozmowy z Claude.
+3. Podstawowa obsługa (na Windowsie i Linuksie zamiast ⌘ używaj Ctrl):
+   - **kółko myszy**, strzałki albo suwak na dole – kolejne przekroje; **Home/End** – pierwszy i ostatni, **spacja** albo przycisk odtwarzania – automatyczne przewijanie (od pierwszego obrazu),
+   - **lewy przycisk** działa zgodnie z wybranym narzędziem na pasku: jasność/kontrast, przesuwanie, lupa albo pomiar,
+   - **prawy przycisk** (przeciąganie) – przesuwanie obrazu, **⌘ + kółko** albo gest szczypania – powiększenie, **dwuklik** albo **R** – powrót do widoku początkowego,
+   - **Jasność ▾** – gotowe ustawienia (automatyczna, z aparatu, większy/mniejszy kontrast), **I** – negatyw, **Obróć** – obrót i odbicia,
+   - **Układ 1 / 2 / 4** – kilka okien obok siebie, np. T1 i T2 albo stare i nowe badanie. Shift + klik na serii wczytuje ją do kolejnego okna. Przy zaznaczonym **„Razem”** okna z tą samą płaszczyzną przewijają się razem, a przerywane **linie odniesienia** pokazują, gdzie przekrój z jednego okna przecina pozostałe,
+   - lista **Płaszczyzna** pozwala obejrzeć rekonstrukcję w innej płaszczyźnie (najlepiej działa dla serii 3D z cienkimi warstwami).
+4. **Pomiary.** Narzędzie **Odległość** (M): przeciągnij od punktu do punktu, a wynik pojawi się w milimetrach. **Strzałka** (T) służy do opisania miejsca na obrazie. Kliknięty pomiar zostaje zaznaczony: można go przesuwać za środek, zmieniać końce za uchwyty i usunąć klawiszem **Delete** albo z menu pod prawym przyciskiem. **⌘Z / ⇧⌘Z** cofa i ponawia, a **Edycja → Usuń wszystkie pomiary** czyści wszystko. Kursor myszy zmienia się zależnie od narzędzia i tego, co jest pod nim.
+5. **Zapisywanie i eksport** (menu **Plik**): bieżący obraz (PNG/JPEG), widok razem z opisami i pomiarami, kopia widoku do schowka, cała seria jako osobne obrazy, animacja GIF, mozaika miniatur i tagi DICOM do pliku tekstowego.
+6. **Ustawienia** (⌘,): motyw jasny/ciemny, wielkość interfejsu i opisów, kolor pomiarów, co pokazywać na obrazie, kierunek i czułość kółka, prędkość odtwarzania, format eksportu, pamięć podręczna oraz ukrywanie danych osobowych pacjenta na ekranie (np. przy pokazywaniu komuś zrzutu).
+
+### Tryb profesjonalny
+
+Przełącznik **Tryb PRO** na pasku (albo w ustawieniach) odsłania narzędzia dla osób, które znają się na obrazowaniu: pomiar kąta, owalny i prostokątny obszar ROI ze statystykami (średnia, odchylenie, min/max, pole), sondę wartości piksela, wskaźnik 3D pokazujący ten sam punkt we wszystkich oknach, ręczne wpisanie szerokości i poziomu okna (W/L), mapy kolorów, ustawienia okien dla tomografii, panel z pełnymi parametrami serii, wszystkimi tagami DICOM i histogramem oraz współrzędne pacjenta (LPS) pod kursorem.
+
+### Dlaczego odtwarzanie i otwarcie serii zaczyna się od środka?
+
+Po kliknięciu serii program pokazuje środkowy przekrój, bo zwykle tam jest najważniejszy fragment badanego narządu. Odtwarzanie rusza jednak od pierwszego obrazu, jeśli serii jeszcze nie przewijałeś. Ustawienia → „Po otwarciu serii pokaż: pierwszy obraz” zmienia też widok początkowy.
+
+### Karta graficzna
+
+Program korzysta ze zintegrowanej karty graficznej, która w zupełności wystarcza do oglądania zdjęć. Na Macu z dwiema kartami nie włącza dedykowanej, więc komputer się nie grzeje. Na Windowsie można to zmienić w **Ustawienia → System → Ekran → Grafika**, a na Linuksie uruchamiając program przez `prime-run` lub z `DRI_PRIME=1`.
 
 ## Podłączenie do Claude (MCP)
 
@@ -53,7 +66,7 @@ Otwórz Claude Desktop → **Ustawienia → Developer → Edit Config** i wpisz 
 }
 ```
 
-Zapisz plik i uruchom Claude Desktop ponownie. Potem możesz napisać np. „Pokaż mi listę serii z badania MRI i opisz, co widać na serii Sag T2”.
+Zapisz plik i uruchom Claude Desktop ponownie. Prościej: w programie wybierz **Pomoc → Podłącz do Claude**, a program sam dopisze tę konfigurację (z kopią zapasową dotychczasowej) albo pokaże gotowe polecenie dla Claude Code. Potem możesz napisać np. „Pokaż mi listę serii z badania MRI i opisz, co widać na serii Sag T2”.
 
 ### Claude Code
 
@@ -63,7 +76,7 @@ claude mcp add mri -- "/Applications/MRI Viewer.app/Contents/MacOS/mri-viewer" m
 
 ### Prywatność
 
-Obrazy, które Claude ogląda przez MCP, są wysyłane do Anthropic tak jak każda inna treść rozmowy. Imię i nazwisko, PESEL/ID pacjenta, data urodzenia, nazwa placówki i nazwiska lekarzy są domyślnie **ukrywane** przed Claude (widzi tylko płeć i wiek). Jeśli chcesz je przekazać, dodaj `--show-patient` do argumentów serwera.
+Obrazy, które Claude ogląda przez MCP, są wysyłane do Anthropic tak jak każda inna treść rozmowy. Imię i nazwisko, PESEL/ID pacjenta, data urodzenia, nazwa placówki i nazwiska lekarzy są domyślnie **ukrywane** przed Claude (widzi tylko płeć i wiek). Jeśli chcesz je przekazać, dodaj `--show-patient` do argumentów serwera albo zaznacz tę opcję w oknie **Podłącz do Claude**. W samym programie, który działa tylko na Twoim komputerze, dane pacjenta są widoczne, chyba że wyłączysz je w ustawieniach.
 
 ## Wiersz poleceń
 

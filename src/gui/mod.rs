@@ -104,6 +104,14 @@ impl App {
             .and_then(|s| eframe::get_value(s, settings::STORAGE_KEY))
             .unwrap_or_default();
         settings.apply(&cc.egui_ctx);
+        // strzałki i trójkąty są tylko w czcionce Hack – używamy jej jako zapasowej
+        let mut fonts = egui::FontDefinitions::default();
+        if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            if !fam.iter().any(|f| f == "Hack") {
+                fam.push("Hack".into());
+            }
+        }
+        cc.egui_ctx.set_fonts(fonts);
         let (thumb_tx, thumb_rx) = channel();
         let (shot_tx, shot_rx) = channel();
         let mut app = Self {
@@ -397,15 +405,22 @@ impl App {
         let old = self.viewports.len();
         if n > old {
             // nowe okna dostają kolejne serie (np. różne płaszczyzny), żeby od razu było co porównać
-            let used: HashSet<usize> = self.viewports.iter().filter_map(|v| v.series_id).collect();
-            let candidates: Vec<usize> = self
-                .lib
-                .as_ref()
-                .map(|l| l.all_series().filter(|(_, s)| s.slices.len() > 3 && !used.contains(&s.id)).map(|(_, s)| s.id).collect())
-                .unwrap_or_default();
+            // pierwszeństwo: serie diagnostyczne (nie lokalizatory) w płaszczyznach, których jeszcze nie widać
+            let mut used: HashSet<usize> = self.viewports.iter().filter_map(|v| v.series_id).collect();
+            let mut planes: Vec<library::Plane> =
+                self.viewports.iter().filter_map(|v| v.series_id.and_then(|id| self.series(id))).map(|s| s.plane).collect();
+            let lib = self.lib.clone();
             for k in old..n {
                 self.viewports.push(Viewport::new());
-                if let Some(&id) = candidates.get(k - old) {
+                let pick = lib.as_ref().and_then(|l| {
+                    l.all_series()
+                        .filter(|(_, s)| !used.contains(&s.id) && s.slices.len() > 1)
+                        .min_by_key(|(_, s)| (is_localizer(s), planes.contains(&s.plane), s.slices.len() <= 3, s.id))
+                        .map(|(_, s)| (s.id, s.plane))
+                });
+                if let Some((id, plane)) = pick {
+                    used.insert(id);
+                    planes.push(plane);
                     self.assign_series(k, id, ctx);
                 }
             }
@@ -1224,7 +1239,7 @@ impl App {
     fn dialogs(&mut self, ctx: &egui::Context) {
         if self.show_settings {
             let mut open = true;
-            egui::Window::new("Ustawienia").open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+            egui::Window::new("Ustawienia").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
                 if self.settings.ui(ui) {
                     self.settings.apply(ctx);
                     self.settings_dirty = true;
@@ -1240,14 +1255,14 @@ impl App {
         }
         if self.show_help {
             let mut open = true;
-            egui::Window::new("Pomoc").open(&mut open).collapsible(false).default_width(560.0).show(ctx, |ui| {
+            egui::Window::new("Pomoc").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).default_width(560.0).show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| help_ui(ui));
             });
             self.show_help = open;
         }
         if self.show_about {
             let mut open = true;
-            egui::Window::new("O programie").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            egui::Window::new("O programie").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
                 ui.heading("Przeglądarka MRI");
                 ui.label(format!("Wersja {}", env!("CARGO_PKG_VERSION")));
                 ui.label("Prosty podgląd badań DICOM z serwerem MCP dla Claude.");
@@ -1261,7 +1276,7 @@ impl App {
             let mut open = true;
             let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("mri-viewer"));
             let args = export::mcp_args(self.folder.as_deref(), self.connect_show_patient);
-            egui::Window::new("Podłącz do Claude (MCP)").open(&mut open).collapsible(false).default_width(620.0).show(ctx, |ui| {
+            egui::Window::new("Podłącz do Claude (MCP)").pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center()).open(&mut open).collapsible(false).default_width(620.0).show(ctx, |ui| {
                 ui.label("Dzięki temu Claude (w aplikacji Claude Desktop albo w Claude Code) może sam przeglądać serie z otwartego folderu, oglądać przekroje i mierzyć.");
                 if self.folder.is_none() {
                     ui.colored_label(Color32::LIGHT_RED, "Najpierw otwórz folder z badaniem – jego ścieżka trafi do konfiguracji.");
@@ -1391,7 +1406,7 @@ impl eframe::App for App {
                 // na start: największa seria (zwykle najciekawsza), z pominięciem lokalizatorów
                 let first = lib
                     .all_series()
-                    .filter(|(_, s)| !s.description.to_lowercase().contains("loc"))
+                    .filter(|(_, s)| !is_localizer(s))
                     .max_by_key(|(_, s)| s.slices.len().min(60))
                     .or_else(|| lib.all_series().next())
                     .map(|(_, s)| s.id);
@@ -1627,4 +1642,10 @@ pub fn run(folder: Option<PathBuf>) -> anyhow::Result<()> {
         Box::new(move |cc| Ok(Box::new(App::new(cc, folder)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Lokalizator (zwiadowczy obraz do planowania badania) – zwykle mało przydatny do oglądania.
+fn is_localizer(s: &Series) -> bool {
+    let d = s.description.to_lowercase();
+    ["loc", "scout", "survey", "plan", "3pl"].iter().any(|k| d.contains(k))
 }

@@ -514,7 +514,7 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
     // --- mysz: przeciąganie -----------------------------------------------------------------------
     let primary_down = resp.drag_started_by(egui::PointerButton::Primary);
     if primary_down {
-        let press = resp.interact_pointer_pos().unwrap_or(rect.center());
+        let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos()).unwrap_or(rect.center());
         let hit = if vp.creating.is_none() { ann::hit_test(&anns, press, &|p| map.to_screen(p)) } else { None };
         match hit {
             Some(Hit::Handle(id, i)) => {
@@ -584,9 +584,6 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
             Drag::Zoom => {
                 let old = vp.zoom;
                 vp.zoom = (vp.zoom * (1.0 - d.y * 0.01)).clamp(0.1, 40.0);
-                if let Some(p) = resp.interact_pointer_pos() {
-                    let _ = p;
-                }
                 vp.pan *= vp.zoom / old;
             }
             Drag::Handle(id, i) => {
@@ -1041,12 +1038,24 @@ pub fn show(ui: &mut egui::Ui, vp: &mut Viewport, inp: ViewInput<'_>) -> ViewOut
         let bar = Rect::from_min_max(Pos2::new(rect.min.x + 12.0, rect.max.y - 28.0), Pos2::new(rect.max.x - 12.0, rect.max.y - 6.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar));
         child.horizontal(|ui| {
-            let play = if vp.playing { "⏸" } else { "▶" };
-            if ui
-                .add(egui::Button::new(play).min_size(Vec2::new(26.0, 20.0)))
-                .on_hover_text("Odtwarzaj / zatrzymaj (spacja)")
-                .clicked()
-            {
+            let resp = ui
+                .add(egui::Button::new("").min_size(Vec2::new(26.0, 20.0)))
+                .on_hover_text("Odtwarzaj / zatrzymaj (spacja)");
+            // ikona rysowana, bo domyślne czcionki nie mają znaku pauzy
+            let c = resp.rect.center();
+            let col = ui.visuals().widgets.style(&resp).fg_stroke.color;
+            if vp.playing {
+                for dx in [-3.0, 3.0] {
+                    ui.painter().rect_filled(Rect::from_center_size(c + Vec2::new(dx, 0.0), Vec2::new(3.0, 10.0)), 0.0, col);
+                }
+            } else {
+                ui.painter().add(egui::Shape::convex_polygon(
+                    vec![c + Vec2::new(-4.0, -6.0), c + Vec2::new(6.0, 0.0), c + Vec2::new(-4.0, 6.0)],
+                    col,
+                    Stroke::NONE,
+                ));
+            }
+            if resp.clicked() {
                 vp.toggle_play(series);
             }
             let mut pos = vp.position() + 1;

@@ -130,7 +130,7 @@ impl Settings {
     /// Okno ustawień. Zwraca true, gdy coś zmieniono.
     pub fn ui(&mut self, ui: &mut egui::Ui) -> bool {
         let before = format!("{self:?}");
-        egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(560.0).min_scrolled_height(480.0).show(ui, |ui| {
             ui.heading("Ogólne");
             ui.checkbox(&mut self.pro_mode, "Tryb profesjonalny")
                 .on_hover_text("Dodatkowe narzędzia (kąt, obszary ROI, sonda, wskaźnik 3D), mapy kolorów, panel tagów DICOM, histogram, dokładne wartości okna, współrzędne w mm.");
