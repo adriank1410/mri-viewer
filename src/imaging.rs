@@ -55,21 +55,21 @@ pub fn window_eps(min: f32, max: f32) -> f32 {
 }
 
 pub fn load_frame(path: &Path, frame: u32) -> Result<Frame> {
-    let obj = open_file(path).with_context(|| format!("nie można otworzyć {}", path.display()))?;
+    let obj = open_file(path).with_context(|| t!("err.image.open", path = path.display()))?;
     frame_from_object(&obj, frame)
 }
 
 pub fn frame_from_object(obj: &DefaultDicomObject, frame: u32) -> Result<Frame> {
     let decoded = obj
         .decode_pixel_data_frame(frame)
-        .map_err(|e| anyhow!("nie udało się zdekodować obrazu: {e}"))?;
+        .map_err(|e| anyhow!(t!("err.image.decode", error = e)))?;
     let width = decoded.columns();
     let height = decoded.rows();
     let photometric = text(obj, tags::PHOTOMETRIC_INTERPRETATION).to_uppercase();
     if decoded.samples_per_pixel() >= 3 {
         let img = decoded
             .to_dynamic_image(0)
-            .map_err(|e| anyhow!("nie udało się zamienić obrazu kolorowego: {e}"))?
+            .map_err(|e| anyhow!(t!("err.image.convert_color", error = e)))?
             .to_rgb8();
         return Ok(Frame {
             width,
@@ -85,7 +85,7 @@ pub fn frame_from_object(obj: &DefaultDicomObject, frame: u32) -> Result<Frame> 
     }
     let values: Vec<f32> = decoded
         .to_vec_frame::<f32>(0)
-        .map_err(|e| anyhow!("nie udało się odczytać pikseli: {e}"))?;
+        .map_err(|e| anyhow!(t!("err.image.read_pixels", error = e)))?;
     let (min, max) = values
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)));
@@ -279,7 +279,7 @@ pub fn resize_gray(src: &[u8], w: u32, h: u32, nw: u32, nh: u32) -> Vec<u8> {
 }
 
 pub fn encode_png_gray(data: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
-    let img = image::GrayImage::from_raw(w, h, data.to_vec()).ok_or_else(|| anyhow!("zły rozmiar obrazu"))?;
+    let img = image::GrayImage::from_raw(w, h, data.to_vec()).ok_or_else(|| anyhow!(t!("err.image.bad_size")))?;
     let mut buf = Cursor::new(Vec::new());
     img.write_to(&mut buf, image::ImageFormat::Png)?;
     Ok(buf.into_inner())

@@ -12,21 +12,30 @@ mod mpr;
 
 use std::path::PathBuf;
 
-const USAGE: &str = "\
-Przeglądarka MRI – prosty podgląd badań DICOM (narzędzie poglądowe, nie diagnostyczne)
-
-Użycie:
-  mri-viewer [FOLDER]                        otwiera okno programu (opcjonalnie od razu z folderem)
-  mri-viewer mcp [FOLDER] [--show-patient]   uruchamia serwer MCP dla Claude (stdio)
-  mri-viewer list FOLDER                     wypisuje znalezione badania i serie
-  mri-viewer --help | --version
-";
+/// Pomoc wiersza poleceń w bieżącym języku.
+fn usage() -> String {
+    let lines = [
+        ("mri-viewer [FOLDER]", t!("cli.usage.gui")),
+        ("mri-viewer mcp [FOLDER] [--show-patient]", t!("cli.usage.mcp")),
+        ("mri-viewer list FOLDER", t!("cli.usage.list")),
+        ("mri-viewer --help | --version", ""),
+    ];
+    let mut out = format!("{}\n\n{}\n", t!("cli.usage.title"), t!("cli.usage.heading"));
+    for (cmd, desc) in lines {
+        let line = format!("  {cmd:<43}{desc}");
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    out
+}
 
 fn main() -> anyhow::Result<()> {
+    // wiersz poleceń działa przed oknem programu – mówi w języku systemu (okno ustawia potem język z ustawień)
+    i18n::set_language(None);
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("-h") | Some("--help") => {
-            print!("{USAGE}");
+            print!("{}", usage());
             Ok(())
         }
         Some("-V") | Some("--version") => {
@@ -47,16 +56,19 @@ fn main() -> anyhow::Result<()> {
             let lib = library::scan(&folder, None);
             for st in &lib.studies {
                 println!(
-                    "Badanie {} {} ({})",
-                    library::fmt_date(&st.date),
-                    st.description,
-                    st.patient_name
+                    "{}",
+                    t!(
+                        "cli.list.study",
+                        date = library::fmt_date(&st.date),
+                        description = st.description,
+                        patient = st.patient_name
+                    )
                 );
                 for se in &st.series {
                     println!("  [{}] {}", se.id, se.title());
                 }
             }
-            println!("Pominięte pliki: {}", lib.skipped_files);
+            println!("{}", t!("cli.list.skipped", count = lib.skipped_files));
             Ok(())
         }
         other => {
