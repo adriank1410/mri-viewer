@@ -395,25 +395,8 @@ impl MriServer {
         // wspólne okno dla wszystkich kafelków (ze środkowego przekroju), chyba że podano
         let mid = &frames[frames.len() / 2];
         let (c, ww, inv) = pick_window(mid, &a.window);
-        let gap = 4u32;
-        let canvas_w = cols * tile + (cols - 1) * gap;
-        let canvas_h = rows * tile + (rows - 1) * gap;
-        let mut canvas = vec![40u8; (canvas_w * canvas_h) as usize];
-        let label_scale = (tile / 64).max(2);
-        for (k, (frame, &si)) in frames.iter().zip(idxs.iter()).enumerate() {
-            let gray = imaging::render_gray8(frame, c, ww, inv);
-            let (tw, th) = imaging::target_size(frame.width, frame.height, se.pixel_spacing, tile);
-            let scaled = imaging::resize_gray(&gray, frame.width, frame.height, tw, th);
-            let cx = (k as u32 % cols) * (tile + gap);
-            let cy = (k as u32 / cols) * (tile + gap);
-            let ox = cx + (tile - tw) / 2;
-            let oy = cy + (tile - th) / 2;
-            for y in 0..th {
-                let dst = ((oy + y) * canvas_w + ox) as usize;
-                canvas[dst..dst + tw as usize].copy_from_slice(&scaled[(y * tw) as usize..((y + 1) * tw) as usize]);
-            }
-            imaging::draw_number(&mut canvas, canvas_w, cx, cy, si + 1, label_scale);
-        }
+        let pairs: Vec<(&Frame, usize)> = frames.iter().zip(idxs.iter()).map(|(f, &i)| (f.as_ref(), i + 1)).collect();
+        let (canvas, canvas_w, canvas_h) = imaging::render_montage(&pairs, (c, ww), inv, se.pixel_spacing, tile, cols);
         let png = imaging::encode_png_gray(&canvas, canvas_w, canvas_h).map_err(err)?;
         let info = format!(
             "Series {} \"{}\" ({}), {} of {} slices: {}. Grid {}x{}, read left-to-right, top-to-bottom. Window center {:.0}, width {:.0}.",

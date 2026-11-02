@@ -14,6 +14,11 @@ pub struct Reformat {
     /// Liczba możliwych położeń w tej płaszczyźnie.
     pub positions: usize,
     pub plane: Plane,
+    /// Kierunki osi obrazu w układzie pacjenta (x rośnie w prawo, y w dół).
+    pub xdir: [f64; 3],
+    pub ydir: [f64; 3],
+    /// Położenie piksela (0, 0) w mm (układ LPS), jeśli znane.
+    pub origin: Option<[f64; 3]>,
 }
 
 #[derive(Clone, Copy)]
@@ -144,12 +149,34 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)));
     let base = &frames[frames.len() / 2];
+    let sgn = |v: [f64; 3], neg: bool| if neg { [-v[0], -v[1], -v[2]] } else { v };
+    let xdir = sgn(vec_of(horiz), hflip);
+    let ydir = sgn(vec_of(vert), vflip);
+    let origin = {
+        let mut ijk = [0usize; 3];
+        let mut set = |a: Axis, v: usize| match a {
+            Axis::Col => ijk[0] = v,
+            Axis::Row => ijk[1] = v,
+            Axis::Slice => ijk[2] = v,
+        };
+        set(fixed, idx);
+        set(vert, if vflip { oh - 1 } else { 0 });
+        set(horiz, if hflip { ow - 1 } else { 0 });
+        series.slices[ijk[2]].position.map(|p| {
+            [
+                p[0] + ijk[0] as f64 * sc * r[0] + ijk[1] as f64 * sr * c[0],
+                p[1] + ijk[0] as f64 * sc * r[1] + ijk[1] as f64 * sr * c[1],
+                p[2] + ijk[0] as f64 * sc * r[2] + ijk[1] as f64 * sr * c[2],
+            ]
+        })
+    };
     Ok(Reformat {
         frame: Frame {
             width: ow as u32,
             height: oh as u32,
             pixels: Pixels::Gray(out),
             dicom_window: base.dicom_window,
+            dicom_windows: base.dicom_windows.clone(),
             auto_window: base.auto_window,
             min,
             max,
@@ -158,5 +185,8 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
         spacing: (sp_of(vert), sp_of(horiz)),
         positions,
         plane,
+        xdir,
+        ydir,
+        origin,
     })
 }

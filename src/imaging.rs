@@ -27,6 +27,8 @@ pub struct Frame {
     pub pixels: Pixels,
     /// Okno zapisane w pliku przez aparat (środek, szerokość).
     pub dicom_window: Option<(f32, f32)>,
+    /// Wszystkie okna zapisane w pliku (środek, szerokość, opis).
+    pub dicom_windows: Vec<(f32, f32, String)>,
     /// Okno wyliczone automatycznie z rozkładu jasności.
     pub auto_window: (f32, f32),
     pub min: f32,
@@ -63,6 +65,7 @@ pub fn frame_from_object(obj: &DefaultDicomObject, frame: u32) -> Result<Frame> 
             height,
             pixels: Pixels::Rgb(img.into_raw()),
             dicom_window: None,
+            dicom_windows: Vec::new(),
             auto_window: (127.5, 255.0),
             min: 0.0,
             max: 255.0,
@@ -75,19 +78,27 @@ pub fn frame_from_object(obj: &DefaultDicomObject, frame: u32) -> Result<Frame> 
     let (min, max) = values
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)));
-    let dicom_window = match (
-        floats(obj, tags::WINDOW_CENTER).and_then(|v| v.first().copied()),
-        floats(obj, tags::WINDOW_WIDTH).and_then(|v| v.first().copied()),
-    ) {
-        (Some(c), Some(w)) if w > 1.0 => Some((c as f32, w as f32)),
-        _ => None,
-    };
+    let centers = floats(obj, tags::WINDOW_CENTER).unwrap_or_default();
+    let widths = floats(obj, tags::WINDOW_WIDTH).unwrap_or_default();
+    let explanations: Vec<String> = text(obj, tags::WINDOW_CENTER_WIDTH_EXPLANATION)
+        .split('\\')
+        .map(|s| s.trim().to_string())
+        .collect();
+    let dicom_windows: Vec<(f32, f32, String)> = centers
+        .iter()
+        .zip(widths.iter())
+        .enumerate()
+        .filter(|(_, (_, w))| **w > 1.0)
+        .map(|(i, (c, w))| (*c as f32, *w as f32, explanations.get(i).cloned().unwrap_or_default()))
+        .collect();
+    let dicom_window = dicom_windows.first().map(|(c, w, _)| (*c, *w));
     let auto_window = auto_window(&values, min, max);
     Ok(Frame {
         width,
         height,
         pixels: Pixels::Gray(values),
         dicom_window,
+        dicom_windows,
         auto_window,
         min,
         max,
@@ -136,24 +147,97 @@ pub fn apply_window(v: f32, center: f32, width: f32, invert: bool) -> u8 {
     if invert { 255 - g } else { g }
 }
 
-/// Piksele w skali szarości (lub RGB) po zastosowaniu okna.
-pub fn render_rgba(frame: &Frame, center: f32, width: f32, invert: bool) -> Vec<u8> {
+/// Mapa kolorów dla obrazów w skali szarości.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum Colormap {
+    #[default]
+    Gray,
+    Hot,
+    Bone,
+    Rainbow,
+    Cool,
+}
+
+impl Colormap {
+    pub const ALL: [Colormap; 5] = [Colormap::Gray, Colormap::Hot, Colormap::Bone, Colormap::Rainbow, Colormap::Cool];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Colormap::Gray => "Skala szarości",
+            Colormap::Hot => "Gorąca (żelazo)",
+            Colormap::Bone => "Kość",
+            Colormap::Rainbow => "Tęcza",
+            Colormap::Cool => "Chłodna",
+        }
+    }
+
+    /// Tablica 256 kolorów RGB.
+    pub fn lut(&self) -> [[u8; 3]; 256] {
+        let mut lut = [[0u8; 3]; 256];
+        for (i, e) in lut.iter_mut().enumerate() {
+            let t = i as f32 / 255.0;
+            let (r, g, b) = match self {
+                Colormap::Gray => (t, t, t),
+                Colormap::Hot => ((t * 3.0).min(1.0), (t * 3.0 - 1.0).clamp(0.0, 1.0), (t * 3.0 - 2.0).clamp(0.0, 1.0)),
+                Colormap::Bone => {
+                    let r = if t < 0.75 { t * 0.875 } else { 0.65625 + (t - 0.75) * 1.375 };
+                    let g = if t < 0.375 { t * 0.875 } else if t < 0.75 { 0.328125 + (t - 0.375) * 1.2083 } else { 0.78125 + (t - 0.75) * 0.875 };
+                    let b = if t < 0.375 { t * 1.2083 } else { 0.453125 + (t - 0.375) * 0.875 };
+                    (r.min(1.0), g.min(1.0), b.min(1.0))
+                }
+                Colormap::Rainbow => {
+                    // niebieski → cyjan → zielony → żółty → czerwony
+                    let h = (1.0 - t) * 240.0;
+                    hsv(h, 1.0, if t == 0.0 { 0.0 } else { 1.0 })
+                }
+                Colormap::Cool => (t, 1.0 - t * 0.5, 1.0),
+            };
+            *e = [(r * 255.0 + 0.5) as u8, (g * 255.0 + 0.5) as u8, (b * 255.0 + 0.5) as u8];
+        }
+        lut
+    }
+}
+
+fn hsv(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+    let (r, g, b) = match (h / 60.0) as i32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    (r + m, g + m, b + m)
+}
+
+/// Piksele RGBA po zastosowaniu okna (i ewentualnie mapy kolorów).
+
+pub fn render_rgba_cmap(frame: &Frame, center: f32, width: f32, invert: bool, cmap: Colormap) -> Vec<u8> {
+    use rayon::prelude::*;
     let n = (frame.width * frame.height) as usize;
-    let mut out = Vec::with_capacity(n * 4);
+    let mut out = vec![255u8; n * 4];
     match &frame.pixels {
         Pixels::Gray(v) => {
             let inv = invert ^ frame.inverted;
-            for &p in v {
-                let g = apply_window(p, center, width, inv);
-                out.extend_from_slice(&[g, g, g, 255]);
-            }
+            let lut = cmap.lut();
+            out.par_chunks_mut(4 * 4096)
+                .zip(v.par_chunks(4096))
+                .for_each(|(o, src)| {
+                    for (px, &p) in o.chunks_exact_mut(4).zip(src) {
+                        let c = lut[apply_window(p, center, width, inv) as usize];
+                        px[0] = c[0];
+                        px[1] = c[1];
+                        px[2] = c[2];
+                    }
+                });
         }
         Pixels::Rgb(v) => {
-            for px in v.chunks_exact(3) {
-                if invert {
-                    out.extend_from_slice(&[255 - px[0], 255 - px[1], 255 - px[2], 255]);
-                } else {
-                    out.extend_from_slice(&[px[0], px[1], px[2], 255]);
+            for (px, s) in out.chunks_exact_mut(4).zip(v.chunks_exact(3)) {
+                for k in 0..3 {
+                    px[k] = if invert { 255 - s[k] } else { s[k] };
                 }
             }
         }
@@ -250,6 +334,39 @@ pub fn draw_number(buf: &mut [u8], stride: u32, x0: u32, y0: u32, n: usize, scal
             }
         }
     }
+}
+
+/// Mozaika przekrojów w skali szarości z numerami w rogach. Zwraca (piksele, szerokość, wysokość).
+pub fn render_montage(
+    frames: &[(&Frame, usize)],
+    window: (f32, f32),
+    invert: bool,
+    spacing: Option<(f64, f64)>,
+    tile: u32,
+    cols: u32,
+) -> (Vec<u8>, u32, u32) {
+    let cols = cols.max(1);
+    let rows = (frames.len() as u32).div_ceil(cols).max(1);
+    let gap = 4u32;
+    let canvas_w = cols * tile + (cols - 1) * gap;
+    let canvas_h = rows * tile + (rows - 1) * gap;
+    let mut canvas = vec![40u8; (canvas_w * canvas_h) as usize];
+    let label_scale = (tile / 64).max(2);
+    for (k, (frame, number)) in frames.iter().enumerate() {
+        let gray = render_gray8(frame, window.0, window.1, invert);
+        let (tw, th) = target_size(frame.width, frame.height, spacing, tile);
+        let scaled = resize_gray(&gray, frame.width, frame.height, tw, th);
+        let cx = (k as u32 % cols) * (tile + gap);
+        let cy = (k as u32 / cols) * (tile + gap);
+        let ox = cx + (tile - tw) / 2;
+        let oy = cy + (tile - th) / 2;
+        for y in 0..th {
+            let dst = ((oy + y) * canvas_w + ox) as usize;
+            canvas[dst..dst + tw as usize].copy_from_slice(&scaled[(y * tw) as usize..((y + 1) * tw) as usize]);
+        }
+        draw_number(&mut canvas, canvas_w, cx, cy, *number, label_scale);
+    }
+    (canvas, canvas_w, canvas_h)
 }
 
 /// Lista elementów nagłówka DICOM jako tekst (bez danych binarnych i obrazu).

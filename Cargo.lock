@@ -463,6 +463,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
+
+[[package]]
 name = "combine"
 version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -528,6 +534,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f97d3416d5337d15c4b0d78c8c91df922ca143f57ec20e2d1c188333047ef04"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -1296,6 +1311,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gif"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
+dependencies = [
+ "color_quant",
+ "weezl",
+]
+
+[[package]]
 name = "gl_generator"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1501,7 +1526,9 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "color_quant",
  "exr",
+ "gif",
  "image-webp",
  "moxcms",
  "num-traits",
@@ -1861,6 +1888,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags 2.13.2",
+ "serde",
+]
+
+[[package]]
 name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2050,9 +2087,10 @@ dependencies = [
 
 [[package]]
 name = "mri-viewer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "base64 0.22.1",
  "dicom-core",
  "dicom-dictionary-std",
@@ -2060,6 +2098,7 @@ dependencies = [
  "dicom-pixeldata",
  "eframe",
  "image",
+ "muda",
  "rayon",
  "rfd",
  "rmcp",
@@ -2068,6 +2107,24 @@ dependencies = [
  "serde_json",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "muda"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "keyboard-types",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "png",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
