@@ -1,6 +1,8 @@
 // W wersji wydawniczej na Windows nie otwieramy okna konsoli.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod cache;
 mod gui;
 mod imaging;

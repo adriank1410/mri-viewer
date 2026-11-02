@@ -23,6 +23,7 @@ base64 = "0.22"
 anyhow = "1"
 rayon = "1"
 walkdir = "2"
+sys-locale = "0.3.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21", default-features = false }
