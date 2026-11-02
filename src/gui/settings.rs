@@ -227,6 +227,8 @@ impl Settings {
     /// Okno ustawień. Zwraca true, gdy coś zmieniono.
     pub fn ui(&mut self, ui: &mut egui::Ui) -> bool {
         let before = format!("{self:?}");
+        // szerokość okna rośnie z wielkością tekstu, żeby wiersze z opcjami nie łamały się bez potrzeby
+        ui.set_min_width(600.0 * self.text_size.clamp(11.0, 24.0) / 14.5);
         egui::ScrollArea::vertical().max_height(560.0).min_scrolled_height(480.0).show(ui, |ui| {
             ui.heading(t!("settings.section.general"));
             ui.horizontal_wrapped(|ui| {
@@ -248,8 +250,11 @@ impl Settings {
                 .on_hover_text(t!("settings.pro_mode.tooltip"));
             ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.start_at.label"));
-                ui.radio_value(&mut self.start_at, StartAt::Middle, t!("settings.start_at.middle"));
-                ui.radio_value(&mut self.start_at, StartAt::First, t!("settings.start_at.first"));
+                // opcje trzymamy razem – przy braku miejsca cała grupa przechodzi do nowej linii
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.start_at, StartAt::Middle, t!("settings.start_at.middle"));
+                    ui.radio_value(&mut self.start_at, StartAt::First, t!("settings.start_at.first"));
+                });
             });
             ui.checkbox(&mut self.hide_patient, t!("settings.hide_patient.label"))
                 .on_hover_text(t!("settings.hide_patient.tooltip"));
@@ -260,9 +265,12 @@ impl Settings {
             ui.heading(t!("settings.section.appearance"));
             ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.theme.label"));
-                ui.radio_value(&mut self.theme, ThemeChoice::Dark, t!("settings.theme.dark"));
-                ui.radio_value(&mut self.theme, ThemeChoice::Light, t!("settings.theme.light"));
-                ui.radio_value(&mut self.theme, ThemeChoice::System, t!("settings.theme.system"));
+                // opcje trzymamy razem – przy braku miejsca cała grupa przechodzi do nowej linii
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.theme, ThemeChoice::Dark, t!("settings.theme.dark"));
+                    ui.radio_value(&mut self.theme, ThemeChoice::Light, t!("settings.theme.light"));
+                    ui.radio_value(&mut self.theme, ThemeChoice::System, t!("settings.theme.system"));
+                });
             });
             ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.ui_scale"));
@@ -339,8 +347,11 @@ impl Settings {
             });
             ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.cine_mode.label"));
-                ui.radio_value(&mut self.cine_mode, CineMode::Loop, t!("settings.cine_mode.loop"));
-                ui.radio_value(&mut self.cine_mode, CineMode::Bounce, t!("settings.cine_mode.bounce"));
+                // opcje trzymamy razem – przy braku miejsca cała grupa przechodzi do nowej linii
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.cine_mode, CineMode::Loop, t!("settings.cine_mode.loop"));
+                    ui.radio_value(&mut self.cine_mode, CineMode::Bounce, t!("settings.cine_mode.bounce"));
+                });
             });
             ui.checkbox(&mut self.sync_scroll, t!("settings.sync_scroll"));
             ui.add_space(8.0);
@@ -348,8 +359,11 @@ impl Settings {
             ui.heading(t!("settings.section.export"));
             ui.horizontal_wrapped(|ui| {
                 ui.label(t!("settings.export_format.label"));
-                ui.radio_value(&mut self.export_format, ExportFormat::Png, t!("settings.export_format.png"));
-                ui.radio_value(&mut self.export_format, ExportFormat::Jpeg, "JPEG");
+                // opcje trzymamy razem – przy braku miejsca cała grupa przechodzi do nowej linii
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.export_format, ExportFormat::Png, t!("settings.export_format.png"));
+                    ui.radio_value(&mut self.export_format, ExportFormat::Jpeg, "JPEG");
+                });
             });
             if self.export_format == ExportFormat::Jpeg {
                 ui.horizontal_wrapped(|ui| {
