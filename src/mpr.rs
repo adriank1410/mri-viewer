@@ -50,7 +50,8 @@ fn plane_from_normal(v: &[f64; 3]) -> Plane {
 /// Płaszczyzny dostępne do rekonstrukcji dla danej serii (poza płaszczyzną akwizycji).
 pub fn available_planes(series: &Series) -> Vec<Plane> {
     let Some(o) = series.orientation else { return vec![] };
-    if series.slices.len() < 8 {
+    // stos z powtórzonymi położeniami (np. kilka ech) dałby prążkowany obraz
+    if series.slices.len() < 8 || series.has_duplicate_positions() {
         return vec![];
     }
     let r = [o[0], o[1], o[2]];
@@ -83,6 +84,9 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
             Pixels::Gray(v) if f.width as usize == w && f.height as usize == h => vols.push(v),
             _ => bail!("przekroje mają różne rozmiary albo są kolorowe"),
         }
+    }
+    if series.has_duplicate_positions() {
+        bail!("kilka przekrojów leży w tym samym miejscu (np. różne echa) – rekonstrukcja niemożliwa");
     }
     let (sr, sc) = series.pixel_spacing.unwrap_or((1.0, 1.0));
     let gap = series.slice_gap().unwrap_or(sr.max(sc));
@@ -118,9 +122,15 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
         Axis::Row => sr,
         Axis::Slice => gap,
     };
-    // pion: oś z największą składową głowa–stopy (z); góra = głowa
-    let (vert, horiz) = if vec_of(a1)[2].abs() >= vec_of(a2)[2].abs() { (a1, a2) } else { (a2, a1) };
-    let vflip = vec_of(vert)[2] > 0.0; // rosnący indeks idzie w górę ciała → odwracamy
+    // pion: w przekroju poprzecznym oś przód–tył (y), góra = przód;
+    // w pozostałych oś z największą składową głowa–stopy (z), góra = głowa
+    let (vert, horiz, vflip) = if plane == Plane::Axial {
+        let (v, h) = if vec_of(a1)[1].abs() >= vec_of(a2)[1].abs() { (a1, a2) } else { (a2, a1) };
+        (v, h, vec_of(v)[1] < 0.0) // rosnący indeks idzie do przodu → odwracamy
+    } else {
+        let (v, h) = if vec_of(a1)[2].abs() >= vec_of(a2)[2].abs() { (a1, a2) } else { (a2, a1) };
+        (v, h, vec_of(v)[2] > 0.0) // rosnący indeks idzie w górę ciała → odwracamy
+    };
     let hdir = vec_of(horiz);
     let hflip = hdir[dominant(&hdir)] < 0.0;
 
@@ -189,4 +199,95 @@ pub fn reformat(series: &Series, frames: &[Arc<Frame>], plane: Plane, index: Opt
         ydir,
         origin,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::{SequenceInfo, Slice};
+    use std::path::PathBuf;
+
+    fn series(o: [f64; 6], n: usize) -> Series {
+        let nrm = [o[1] * o[5] - o[2] * o[4], o[2] * o[3] - o[0] * o[5], o[0] * o[4] - o[1] * o[3]];
+        Series {
+            id: 1,
+            uid: String::new(),
+            number: None,
+            description: String::new(),
+            modality: "MR".into(),
+            body_part: String::new(),
+            plane: Plane::Unknown,
+            rows: 4,
+            columns: 4,
+            pixel_spacing: Some((1.0, 1.0)),
+            slice_thickness: None,
+            spacing_between_slices: None,
+            orientation: Some(o),
+            frame_of_reference: String::new(),
+            sequence: SequenceInfo::default(),
+            series_date: String::new(),
+            series_time: String::new(),
+            variant: String::new(),
+            may_have_burned_in_text: false,
+            slices: (0..n)
+                .map(|k| Slice {
+                    path: PathBuf::new(),
+                    frame: 0,
+                    instance_number: None,
+                    position: Some([nrm[0] * k as f64, nrm[1] * k as f64, nrm[2] * k as f64]),
+                    slice_location: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn frames(n: usize) -> Vec<Arc<Frame>> {
+        (0..n)
+            .map(|_| {
+                Arc::new(Frame {
+                    width: 4,
+                    height: 4,
+                    pixels: Pixels::Gray(vec![0.0; 16]),
+                    dicom_window: None,
+                    dicom_windows: Vec::new(),
+                    auto_window: (0.5, 1.0),
+                    min: 0.0,
+                    max: 1.0,
+                    inverted: false,
+                })
+            })
+            .collect()
+    }
+
+    fn assert_axial(o: [f64; 6]) {
+        let se = series(o, 8);
+        let rf = reformat(&se, &frames(8), Plane::Axial, None).unwrap();
+        // góra = przód (w dół rośnie y), prawa strona obrazu = lewa pacjenta (+x)
+        assert_eq!(rf.ydir, [0.0, 1.0, 0.0], "ydir dla {o:?}");
+        assert_eq!(rf.xdir, [1.0, 0.0, 0.0], "xdir dla {o:?}");
+    }
+
+    #[test]
+    fn axial_reformat_is_in_radiological_orientation() {
+        assert_axial([1.0, 0.0, 0.0, 0.0, 0.0, -1.0]); // czołowa
+        assert_axial([0.0, 1.0, 0.0, 0.0, 0.0, -1.0]); // strzałkowa
+        assert_axial([0.0, -1.0, 0.0, 0.0, 0.0, -1.0]); // strzałkowa, odwrócone wiersze
+    }
+
+    #[test]
+    fn coronal_reformat_has_head_on_top() {
+        let se = series([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 8); // poprzeczna
+        let rf = reformat(&se, &frames(8), Plane::Coronal, None).unwrap();
+        assert_eq!(rf.ydir, [0.0, 0.0, -1.0]);
+        assert_eq!(rf.xdir, [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn duplicate_positions_block_reformat() {
+        let mut se = series([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 8);
+        let p = se.slices[0].position;
+        se.slices[1].position = p;
+        assert!(available_planes(&se).is_empty());
+        assert!(reformat(&se, &frames(8), Plane::Coronal, None).is_err());
+    }
 }

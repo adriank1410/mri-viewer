@@ -41,6 +41,17 @@ impl Frame {
     pub fn default_window(&self) -> (f32, f32) {
         self.dicom_window.unwrap_or(self.auto_window)
     }
+
+    /// Najmniejsza sensowna szerokość okna – zależna od zakresu wartości,
+    /// bo mapy parametryczne mogą mieć wartości rzędu 0,001.
+    pub fn window_eps(&self) -> f32 {
+        window_eps(self.min, self.max)
+    }
+}
+
+pub fn window_eps(min: f32, max: f32) -> f32 {
+    let range = max - min;
+    if range.is_finite() { (range * 1e-3).max(f32::MIN_POSITIVE) } else { f32::MIN_POSITIVE }
 }
 
 pub fn load_frame(path: &Path, frame: u32) -> Result<Frame> {
@@ -88,7 +99,7 @@ pub fn frame_from_object(obj: &DefaultDicomObject, frame: u32) -> Result<Frame> 
         .iter()
         .zip(widths.iter())
         .enumerate()
-        .filter(|(_, (_, w))| **w > 1.0)
+        .filter(|(_, (_, w))| **w > 0.0)
         .map(|(i, (c, w))| (*c as f32, *w as f32, explanations.get(i).cloned().unwrap_or_default()))
         .collect();
     let dicom_window = dicom_windows.first().map(|(c, w, _)| (*c, *w));
@@ -134,7 +145,7 @@ fn auto_window(values: &[f32], min: f32, max: f32) -> (f32, f32) {
         max
     };
     let lo = pick(0.01);
-    let hi = pick(0.995).max(lo + 1.0);
+    let hi = pick(0.995).max(lo + window_eps(min, max));
     ((lo + hi) / 2.0, hi - lo)
 }
 
@@ -142,7 +153,7 @@ fn auto_window(values: &[f32], min: f32, max: f32) -> (f32, f32) {
 #[inline]
 pub fn apply_window(v: f32, center: f32, width: f32, invert: bool) -> u8 {
     let lo = center - width / 2.0;
-    let t = ((v - lo) / width.max(1e-6)).clamp(0.0, 1.0);
+    let t = ((v - lo) / width.max(f32::MIN_POSITIVE)).clamp(0.0, 1.0);
     let g = (t * 255.0 + 0.5) as u8;
     if invert { 255 - g } else { g }
 }
@@ -478,6 +489,16 @@ pub fn region_stats(frame: &Frame, x: u32, y: u32, w: u32, h: u32) -> Option<(f6
 mod tests {
     use super::*;
     use dicom_object::Tag;
+
+    #[test]
+    fn auto_window_handles_small_value_range() {
+        let values: Vec<f32> = (0..1000).map(|i| i as f32 * 3e-6).collect();
+        let (c, w) = auto_window(&values, 0.0, values[999]);
+        assert!(w > 0.0 && w < 0.004, "szerokość {w}");
+        assert!(c > 0.0 && c < 0.003, "środek {c}");
+        // piksel w środku zakresu nie może być czarny
+        assert!(apply_window(0.0015, c, w, false) > 100);
+    }
 
     #[test]
     fn identifying_tags_are_hidden() {
