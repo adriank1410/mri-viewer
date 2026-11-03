@@ -88,6 +88,10 @@ jobs:
     if: github.event_name == 'push'
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
+    # dwa szybkie scalenia: starsze wydanie czeka na nowsze, zamiast ścigać się o wydanie „latest”
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -111,7 +115,8 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" --title "MRI Viewer ${TAG#v}" --notes-file notes.md --latest dist/*.zip dist/*.tar.gz
           fi
-          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+          # „Latest build” tylko z najnowszego stanu main (starszy przebieg po nowszym niczego nie nadpisze)
+          if [[ "$GITHUB_REF" == refs/heads/main && "$(gh api "repos/$GH_REPO/commits/main" --jq .sha)" == "$GITHUB_SHA" ]]; then
             gh release delete latest --yes --cleanup-tag || true
             gh release create latest --target "$GITHUB_SHA" --prerelease --latest=false --title "Latest build" \
               --notes "Built automatically from the main branch ($GITHUB_SHA), with changes that may not be in a numbered release yet. Mac: download MRI-Viewer-macOS.zip." \
