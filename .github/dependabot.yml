@@ -1,0 +1,25 @@
+# Automatyczne aktualizacje zależności (Dependabot)
+version: 2
+updates:
+  # Zależności Rust (Cargo.toml / Cargo.lock)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Europe/Warsaw"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Akcje w .github/workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Europe/Warsaw"
+    groups:
+      github-actions:
+        patterns: ["*"]
