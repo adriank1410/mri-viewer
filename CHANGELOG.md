@@ -4,6 +4,12 @@ A new version is published automatically on GitHub when the `version` in `Cargo.
 
 MRI Viewer is an informational and educational image viewer, not a medical device. It is not intended for diagnosis, and its measurements are approximate.
 
+## Unreleased
+
+**Claude (MCP)**
+
+- `view_slice`, `view_montage` and `view_reformat` can save the rendered PNG to a file (`save_path`, absolute or starting with `~/`). With `return_image: false` the image is only saved and not sent back, which makes exporting many images cheap. No separate script is needed any more.
+
 ## 0.2.0
 
 First public release.
