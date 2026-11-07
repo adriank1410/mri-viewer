@@ -23,6 +23,8 @@ const INSTRUCTIONS: &str = "This server gives read-only access to medical imagin
 stored on the user's computer, for informational and educational viewing. Workflow: call list_series first, then \
 view_montage to get an overview of a series, then view_slice for detail. Slice numbers are 1-based. Images are \
 rendered as PNG with a window (brightness/contrast) that you can change via window_center/window_width. \
+view_slice, view_montage and view_reformat can also save the PNG to a file on the user's computer (save_path); \
+with return_image=false the file is only saved, which is useful for exporting many images. \
 IMPORTANT: this software is a general-purpose image viewer, not a medical device. It is not intended for diagnosis, \
 screening, monitoring or treatment decisions, and its measurements and statistics are approximate. When describing \
 what is visible, explain anatomy and imaging terms in plain language, be explicit about uncertainty, do not present \
@@ -61,6 +63,17 @@ pub struct WindowArgs {
     pub invert: Option<bool>,
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct OutputArgs {
+    /// Optional: also save the PNG to this file on the user's computer. Absolute path or one starting with
+    /// "~/" (home folder); ".png" is added if there is no extension. Missing folders are created and an existing
+    /// PNG file is overwritten.
+    pub save_path: Option<String>,
+    /// Return the image in the response (default true). Set to false together with save_path to export
+    /// files without using context.
+    pub return_image: Option<bool>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ViewSliceArgs {
     /// Series id from list_series.
@@ -73,6 +86,8 @@ pub struct ViewSliceArgs {
     pub window: WindowArgs,
     /// Optional crop/zoom region in ORIGINAL image pixel coordinates: [x, y, width, height].
     pub region: Option<[u32; 4]>,
+    #[serde(flatten)]
+    pub output: OutputArgs,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -89,6 +104,8 @@ pub struct MontageArgs {
     pub tile: Option<u32>,
     #[serde(flatten)]
     pub window: WindowArgs,
+    #[serde(flatten)]
+    pub output: OutputArgs,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -135,6 +152,8 @@ pub struct ReformatArgs {
     pub size: Option<u32>,
     #[serde(flatten)]
     pub window: WindowArgs,
+    #[serde(flatten)]
+    pub output: OutputArgs,
 }
 
 fn err(msg: impl std::fmt::Display) -> McpError {
@@ -143,6 +162,69 @@ fn err(msg: impl std::fmt::Display) -> McpError {
 
 fn png_block(png: Vec<u8>) -> ContentBlock {
     ContentBlock::image(base64::engine::general_purpose::STANDARD.encode(png), "image/png")
+}
+
+/// Ścieżka docelowa zapisu: bezwzględna albo od „~/”, zawsze z rozszerzeniem .png.
+fn resolve_save_path(raw: &str, home: Option<PathBuf>) -> Result<PathBuf, McpError> {
+    let raw = raw.trim();
+    let mut path = if raw == "~" || raw.starts_with("~/") || raw.starts_with("~\\") {
+        let home = home.ok_or_else(|| err("Cannot find the home folder for a path starting with ~"))?;
+        home.join(raw[1..].trim_start_matches(['/', '\\']))
+    } else {
+        PathBuf::from(raw)
+    };
+    if !path.is_absolute() {
+        return Err(err("save_path must be an absolute path (or start with ~/)"));
+    }
+    if raw == "~" || path.file_name().is_none() || raw.ends_with(['/', '\\']) {
+        return Err(err("save_path must include a file name, e.g. ~/Desktop/slice.png"));
+    }
+    match path.extension().and_then(|e| e.to_str()) {
+        None => {
+            path.set_extension("png");
+        }
+        Some(e) if e.eq_ignore_ascii_case("png") => {}
+        Some(e) => return Err(err(format!("save_path must end with .png (got .{e})"))),
+    }
+    if path.is_dir() {
+        return Err(err("save_path points to a folder"));
+    }
+    Ok(path)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Wynik narzędzia z obrazem: opcjonalny zapis na dysk i opcjonalne pominięcie obrazu w odpowiedzi.
+async fn image_result(mut info: String, png: Vec<u8>, out: &OutputArgs) -> Result<CallToolResult, McpError> {
+    let return_image = out.return_image.unwrap_or(true);
+    if !return_image && out.save_path.is_none() {
+        return Err(err("Nothing to do: return_image is false and no save_path was given."));
+    }
+    if let Some(raw) = &out.save_path {
+        let path = resolve_save_path(raw, home_dir())?;
+        let bytes = png.clone();
+        let target = path.clone();
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            if let Some(dir) = target.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&target, bytes)
+        })
+        .await
+        .map_err(err)?
+        .map_err(|e| err(format!("Cannot save the image to {}: {e}", path.display())))?;
+        let _ = write!(info, " Saved PNG ({} bytes) to {}.", png.len(), path.display());
+    }
+    let mut content = vec![ContentBlock::text(info)];
+    if return_image {
+        content.push(png_block(png));
+    }
+    Ok(CallToolResult::success(content))
 }
 
 fn fmt_opt(v: Option<f64>, unit: &str) -> String {
@@ -413,7 +495,7 @@ impl MriServer {
         Ok(CallToolResult::success(vec![ContentBlock::text(out)]))
     }
 
-    #[tool(description = "Render one slice of a series as a PNG image. Optionally set window center/width, invert, or crop to a region (in original pixel coordinates) to zoom in.")]
+    #[tool(description = "Render one slice of a series as a PNG image. Optionally set window center/width, invert, or crop to a region (in original pixel coordinates) to zoom in. With save_path the PNG is also saved to a file.")]
     async fn view_slice(&self, Parameters(a): Parameters<ViewSliceArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
         self.check_viewable(&se)?;
@@ -449,10 +531,10 @@ impl MriServer {
             fmt_val(frame.min),
             fmt_val(frame.max)
         );
-        Ok(CallToolResult::success(vec![ContentBlock::text(info), png_block(png)]))
+        image_result(info, png, &a.output).await
     }
 
-    #[tool(description = "Render a grid (montage) of evenly spaced slices from a series in one PNG, each tile labelled with its 1-based slice number in the top-left corner. Best way to get an overview.")]
+    #[tool(description = "Render a grid (montage) of evenly spaced slices from a series in one PNG, each tile labelled with its 1-based slice number in the top-left corner. Best way to get an overview. With save_path the PNG is also saved to a file.")]
     async fn view_montage(&self, Parameters(a): Parameters<MontageArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
         self.check_viewable(&se)?;
@@ -503,7 +585,7 @@ impl MriServer {
             fmt_val(c),
             fmt_val(ww)
         );
-        Ok(CallToolResult::success(vec![ContentBlock::text(info), png_block(png)]))
+        image_result(info, png, &a.output).await
     }
 
     #[tool(description = "Detailed info about a series: acquisition parameters, available reconstruction planes and the position of every slice.")]
@@ -598,7 +680,7 @@ impl MriServer {
         ))]))
     }
 
-    #[tool(description = "Reconstruct an image in another plane (multiplanar reformat) from a stack of parallel slices, e.g. a coronal view from an axial series. Quality depends on slice spacing: thick slices give blurry/stair-step reformats.")]
+    #[tool(description = "Reconstruct an image in another plane (multiplanar reformat) from a stack of parallel slices, e.g. a coronal view from an axial series. Quality depends on slice spacing: thick slices give blurry/stair-step reformats. With save_path the PNG is also saved to a file.")]
     async fn view_reformat(&self, Parameters(a): Parameters<ReformatArgs>) -> Result<CallToolResult, McpError> {
         let (_st, se) = self.series(a.series_id)?;
         self.check_viewable(&se)?;
@@ -630,7 +712,7 @@ impl MriServer {
             rf.spacing.1,
             wnote
         );
-        Ok(CallToolResult::success(vec![ContentBlock::text(info), png_block(png)]))
+        image_result(info, png, &a.output).await
     }
 }
 
@@ -690,5 +772,45 @@ mod tests {
             t,
             "Top of image = anterior, bottom = posterior, image left = patient right, image right = patient left."
         );
+    }
+    #[test]
+    fn save_path_is_resolved() {
+        let home = std::env::temp_dir().join("mri-viewer-home");
+        let abs = std::env::temp_dir().join("x").join("slice");
+        let p = resolve_save_path(abs.to_str().unwrap(), None).unwrap();
+        assert_eq!(p, abs.with_extension("png"));
+        let p = resolve_save_path("~/Desktop/a.PNG", Some(home.clone())).unwrap();
+        assert_eq!(p, home.join("Desktop").join("a.PNG"));
+        assert!(resolve_save_path("relative/a.png", Some(home.clone())).is_err());
+        assert!(resolve_save_path("~", Some(home.clone())).is_err());
+        assert!(resolve_save_path("~/a.png", None).is_err());
+        let jpg = std::env::temp_dir().join("a.jpg");
+        assert!(resolve_save_path(jpg.to_str().unwrap(), None).is_err());
+        let dir = std::env::temp_dir().join("dir").join("");
+        assert!(resolve_save_path(dir.to_str().unwrap(), None).is_err());
+    }
+
+    #[test]
+    fn image_is_saved_to_file() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let dir = std::env::temp_dir().join(format!("mri-viewer-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let target = dir.join("sub").join("img");
+        let png = imaging::encode_png_gray(&[0, 128, 255, 64], 2, 2).unwrap();
+
+        let out = OutputArgs { save_path: Some(target.to_str().unwrap().into()), return_image: Some(false) };
+        let res = rt.block_on(image_result("info.".into(), png.clone(), &out)).unwrap();
+        let saved = target.with_extension("png");
+        assert_eq!(std::fs::read(&saved).unwrap(), png);
+        assert_eq!(res.content.len(), 1, "image not returned when return_image=false");
+
+        // domyślnie obraz wraca też w odpowiedzi, a istniejący plik jest nadpisywany
+        let out = OutputArgs { save_path: Some(saved.to_str().unwrap().into()), return_image: None };
+        let res = rt.block_on(image_result("info.".into(), png.clone(), &out)).unwrap();
+        assert_eq!(res.content.len(), 2);
+
+        let none = OutputArgs { save_path: None, return_image: Some(false) };
+        assert!(rt.block_on(image_result("info.".into(), png, &none)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

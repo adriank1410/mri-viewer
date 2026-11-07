@@ -53,6 +53,8 @@ The program uses the integrated graphics, which is more than enough for viewing 
 
 The MCP server lets Claude: list the series of a study with their parameters, view a chosen slice, see a whole series as a thumbnail montage, reconstruct an image in another plane, measure an approximate distance, compute brightness statistics in a region, and read DICOM headers.
 
+Claude can also save the images it views (a single slice, a montage or a reconstruction) as PNG files on your computer, for example to put them into a report or show them to a doctor. It is enough to ask, e.g. "save this image to the Desktop"; under the hood the `view_slice`, `view_montage` and `view_reformat` tools accept an optional `save_path` (an absolute path or one starting with `~/`, with `.png` added if missing; folders are created and an existing PNG is overwritten) and `return_image: false`, which only saves the file without sending the image to Claude.
+
 The examples below assume the program is in the Applications folder and the scans are in `Downloads/MRI`. Replace `YOUR_NAME` with your Mac account name (the name of your home folder in Finder).
 
 ### Claude Desktop
