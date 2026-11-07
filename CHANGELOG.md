@@ -4,7 +4,7 @@ A new version is published automatically on GitHub when the `version` in `Cargo.
 
 MRI Viewer is an informational and educational image viewer, not a medical device. It is not intended for diagnosis, and its measurements are approximate.
 
-## Unreleased
+## 0.2.1
 
 **Claude (MCP)**
 
