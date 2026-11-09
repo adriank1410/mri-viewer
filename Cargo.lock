@@ -222,12 +222,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "base64"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
@@ -2091,7 +2085,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "arboard",
- "base64 0.22.1",
+ "base64",
  "dicom-core",
  "dicom-dictionary-std",
  "dicom-object",
@@ -3136,7 +3130,7 @@ version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8be15815186873ea063bf005011d16c356804973489e40c39116ae3a2878d1f"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "chrono",
  "futures",
  "indexmap",
