@@ -14,7 +14,7 @@ dicom-object = "0.10"
 dicom-dictionary-std = "0.10"
 dicom-pixeldata = { version = "0.10", features = ["openjpeg-sys", "image"] }
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
-rfd = "0.17"
+rfd = "0.18"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 rmcp = { version = "3.8", features = ["server", "transport-io", "macros", "schemars"] }
